@@ -6,7 +6,7 @@ anchor_version = "0.31.1"
 seeds = false
 
 [programs.localnet]
-amm_v3 = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+amm_v3 = "6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6"
 
 [registry]
 url = "https://github.com/raydium-io/raydium-amm-v3"
