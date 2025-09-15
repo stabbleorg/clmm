@@ -4,13 +4,17 @@ anchor_version = "0.31.1"
 
 [features]
 seeds = false
+devnet = true
 
 [programs.localnet]
+amm_v3 = "6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6"
+
+[programs.devnet]
 amm_v3 = "6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6"
 
 [registry]
 url = "https://github.com/raydium-io/raydium-amm-v3"
 
 [provider]
-cluster = "localnet"
-wallet = "~/.config/solana/id.json"
+cluster = "devnet"
+wallet = ".keypair/id.json"
