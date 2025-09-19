@@ -1,7 +1,7 @@
 import {Command} from "commander";
 import {clmmProgram, localKeypair, parsePublicKey} from "./utils";
 import {PublicKey} from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {BN} from "@coral-xyz/anchor";
 
 export function createPool(program: Command) {
@@ -27,7 +27,6 @@ export function createPool(program: Command) {
       ammConfig?: PublicKey
     }) => {
       const devnetAmmConfig = new PublicKey("5waGmTN1wazZMqTw1FBRabW2DoK6XRkHC1vqAQWJF8wd");
-      console.log("Program id:", clmmProgram.provider.connection.rpcEndpoint)
       const tx = await clmmProgram.methods.createPool(
         new BN(priceSqrt),
         new BN(openTime),
