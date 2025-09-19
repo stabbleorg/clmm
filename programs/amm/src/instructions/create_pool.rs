@@ -129,13 +129,13 @@ pub fn create_pool(ctx: Context<CreatePool>, sqrt_price_x64: u128, open_time: u6
         &ctx.remaining_accounts,
         &ctx.accounts.token_mint_1,
     )?;
-    if !(util::is_supported_mint(&ctx.accounts.token_mint_0, mint0_associated_is_initialized)
-        .unwrap()
-        && util::is_supported_mint(&ctx.accounts.token_mint_1, mint1_associated_is_initialized)
-            .unwrap())
-    {
-        return err!(ErrorCode::NotSupportMint);
-    }
+//     if !(util::is_supported_mint(&ctx.accounts.token_mint_0, mint0_associated_is_initialized)
+//         .unwrap()
+//         && util::is_supported_mint(&ctx.accounts.token_mint_1, mint1_associated_is_initialized)
+//             .unwrap())
+//     {
+//         return err!(ErrorCode::NotSupportMint);
+//     }
     let block_timestamp = solana_program::clock::Clock::get()?.unix_timestamp as u64;
     require_gt!(block_timestamp, open_time);
     let pool_id = ctx.accounts.pool_state.key();
