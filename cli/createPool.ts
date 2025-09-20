@@ -14,7 +14,7 @@ export function createPool(program: Command) {
     .option("--token-program-a <string>", "Token Program", parsePublicKey)
     .option("--token-program-b <string>", "Token Program", parsePublicKey)
     .option("-c, --amm-config <string>", "AMM/CLMM Config", parsePublicKey)
-    .description("signs a message with the provided keypair")
+    .description("create a pool with the given tokens")
     .action(async({
       priceSqrt, openTime, tokenMintA, tokenMintB, tokenProgramA, tokenProgramB, ammConfig
     }: {

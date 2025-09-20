@@ -5,6 +5,7 @@ import * as dotenv from 'dotenv';
 import {AnchorProvider, Wallet} from "@coral-xyz/anchor";
 import {clusterApiUrl, Connection, Keypair} from "@solana/web3.js";
 import {createPool} from "./createPool";
+import {fetchPool} from "./fetchPool";
 
 program
   .version("0.13.6")
@@ -22,6 +23,7 @@ program
   });
 
 createPool(program);
+fetchPool(program);
 
 program.parse(process.argv);
 
