@@ -4,7 +4,7 @@ import ID from '../.keypair/id.json';
 import idl from '../target/idl/amm_v3.json';
 import { AmmV3 } from '../target/types/amm_v3';
 import * as dotenv from 'dotenv';
-import {AnchorProvider, Program, Wallet} from "@coral-xyz/anchor";
+import {AnchorProvider, BN, Program, Wallet} from "@coral-xyz/anchor";
 dotenv.config();
 
 export const connection = new Connection(process.env.RPC_URL!);
@@ -41,4 +41,8 @@ export function parseKey(key: string): PublicKey {
 
 export function parseDate(value: string): Date {
   return new Date(value);
+}
+
+export function parseBN(value: string): BN {
+  return new BN(value);
 }

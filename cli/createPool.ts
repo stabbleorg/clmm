@@ -1,5 +1,5 @@
 import {Command} from "commander";
-import {clmmProgram, localKeypair, parsePublicKey} from "./utils";
+import {clmmProgram, localKeypair, parseBN, parsePublicKey} from "./utils";
 import {PublicKey} from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {BN} from "@coral-xyz/anchor";
@@ -7,8 +7,8 @@ import {BN} from "@coral-xyz/anchor";
 export function createPool(program: Command) {
   program
     .command("create-pool")
-    .requiredOption("-p, --price-sqrt <number>", "Price Sqrt.64", Number)
-    .requiredOption("-o, --open-time <number>", "Open Timestamp", Number)
+    .requiredOption("-p, --price-sqrt <number>", "Price Sqrt.64", parseBN)
+    .requiredOption("-o, --open-time <number>", "Open Timestamp", parseBN)
     .requiredOption("-a, --token-mint-a <string>", "Token Mint A", parsePublicKey)
     .requiredOption("-b, --token-mint-b <string>", "Token Mint B", parsePublicKey)
     .option("--token-program-a <string>", "Token Program", parsePublicKey)
@@ -18,8 +18,8 @@ export function createPool(program: Command) {
     .action(async({
       priceSqrt, openTime, tokenMintA, tokenMintB, tokenProgramA, tokenProgramB, ammConfig
     }: {
-      priceSqrt: number,
-      openTime: number,
+      priceSqrt: BN,
+      openTime: BN,
       tokenMintA: PublicKey,
       tokenMintB: PublicKey,
       tokenProgramA?: PublicKey,
@@ -28,8 +28,8 @@ export function createPool(program: Command) {
     }) => {
       const devnetAmmConfig = new PublicKey("5waGmTN1wazZMqTw1FBRabW2DoK6XRkHC1vqAQWJF8wd");
       const tx = await clmmProgram.methods.createPool(
-        new BN(priceSqrt),
-        new BN(openTime),
+        priceSqrt,
+        openTime,
       ).accounts({
         poolCreator: localKeypair.publicKey,
         ammConfig: ammConfig || devnetAmmConfig,
