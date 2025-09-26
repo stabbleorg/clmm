@@ -1,0 +1,72 @@
+/**
+ * Main CLMM SDK Client
+ * Central entry point providing access to all SDK functionality
+ */
+
+import type { ClmmSdkConfig } from './types';
+import { PoolManager } from './pool-manager';
+import { PositionManager } from './position-manager';
+import { SwapManager } from './swap';
+import { RewardsManager } from './rewards';
+
+export class ClmmSdk {
+  /** Pool management functionality */
+  public readonly pools: PoolManager;
+
+  /** Position management functionality */
+  public readonly positions: PositionManager;
+
+  /** Swap functionality */
+  public readonly swap: SwapManager;
+
+  /** Rewards and fee collection functionality */
+  public readonly rewards: RewardsManager;
+
+  /** SDK configuration */
+  public readonly config: ClmmSdkConfig;
+
+  constructor(config: ClmmSdkConfig) {
+    this.config = config;
+    this.pools = new PoolManager(config);
+    this.positions = new PositionManager(config);
+    this.swap = new SwapManager(config);
+    this.rewards = new RewardsManager(config);
+  }
+
+  /**
+   * Create a new instance with updated configuration
+   * @param newConfig - Updated configuration
+   * @returns New SDK instance
+   */
+  withConfig(newConfig: Partial<ClmmSdkConfig>): ClmmSdk {
+    return new ClmmSdk({
+      ...this.config,
+      ...newConfig,
+    });
+  }
+
+  /**
+   * Get the current program address
+   * @returns Program address
+   */
+  getProgramAddress(): string {
+    return this.config.programAddress || '6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6';
+  }
+
+  /**
+   * Get the current commitment level
+   * @returns Commitment level
+   */
+  getCommitment(): 'processed' | 'confirmed' | 'finalized' {
+    return this.config.commitment || 'confirmed';
+  }
+}
+
+/**
+ * Factory function to create a new CLMM SDK instance
+ * @param config - SDK configuration
+ * @returns New SDK instance
+ */
+export function createClmmSdk(config: ClmmSdkConfig): ClmmSdk {
+  return new ClmmSdk(config);
+}
