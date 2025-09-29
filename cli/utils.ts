@@ -35,10 +35,6 @@ export function parsePublicKey(key: string): PublicKey {
   return new PublicKey(key);
 }
 
-export function parseKey(key: string): PublicKey {
-  return new PublicKey(key);
-}
-
 export function parseDate(value: string): Date {
   return new Date(value);
 }

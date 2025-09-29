@@ -11,6 +11,7 @@ export function fetchPool(program: Command) {
       const poolState = await clmmProgram.account.poolState.fetch(poolKey);
       console.log({
         ...poolState,
+        sqrtPriceX64: poolState.sqrtPriceX64.toString(),
       });
     });
 }

@@ -6,6 +6,7 @@ import {AnchorProvider, Wallet} from "@coral-xyz/anchor";
 import {clusterApiUrl, Connection, Keypair} from "@solana/web3.js";
 import {createPool} from "./createPool";
 import {fetchPool} from "./fetchPool";
+import {createConfig} from "./createConfig";
 
 program
   .version("0.13.6")
@@ -24,6 +25,7 @@ program
 
 createPool(program);
 fetchPool(program);
+createConfig(program);
 
 program.parse(process.argv);
 
