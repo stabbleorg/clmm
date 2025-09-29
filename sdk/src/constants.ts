@@ -164,10 +164,13 @@ export const DISCRIMINATORS = {
 
 // PDA seeds
 export const PDA_SEEDS = {
-  POOL_STATE: "pool",
   AMM_CONFIG: "amm_config",
+  POOL_STATE: "pool",
+  POOL_VAULT_SEED: "pool_vault",
+  POOL_REWARD_VAULT_SEED: "pool_reward_vault",
   POSITION_STATE: "position",
   TICK_ARRAY_STATE: "tick_array",
   OBSERVATION_STATE: "observation",
-  BITMAP_EXTENSION: "bitmap_extension",
+  OPERATION_SEED: "operation",
+  BITMAP_EXTENSION: "pool_tick_array_bitmap_extension",
 } as const;

@@ -1,21 +1,3 @@
-import {
-  getCreatePoolInstruction,
-  getCreateAmmConfigInstruction,
-  getOpenPositionInstruction,
-  getOpenPositionV2Instruction,
-  getIncreaseLiquidityInstruction,
-  getDecreaseLiquidityInstruction,
-  getClosePositionInstruction,
-  getSwapInstruction,
-  getSwapV2Instruction,
-  fetchPoolState,
-  fetchMaybePoolState,
-  fetchPersonalPositionState,
-  fetchMaybePersonalPositionState,
-  fetchAmmConfig,
-  fetchMaybeAmmConfig,
-} from "./generated";
-
 // Core SDK exports
 export { ClmmSdk, createClmmSdk } from "./client";
 export { Clmm } from "./clmm";
@@ -29,7 +11,7 @@ export { PoolManager } from "./pool-manager";
 export { PositionManager } from "./position-manager";
 // NOTE: Disabled
 // export { SwapManager } from './swap';
-export { RewardsManager } from "./rewards";
+// export { RewardsManager } from "./rewards";
 
 // Type definitions
 export type * from "./types";

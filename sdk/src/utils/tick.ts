@@ -3,8 +3,7 @@
  * Handles tick spacing, initialization, and array management
  */
 
-import type { Address, Rpc } from "@solana/kit";
-import type { TickArrayState } from "../generated";
+import { ClusterUrl, createSolanaRpc, RpcTransportFromClusterUrl, type Address, type Rpc } from "@solana/kit";
 import { ClmmError, ClmmErrorCode } from "../types";
 import { MIN_TICK, MAX_TICK, TICKS_PER_ARRAY } from "../constants";
 import { PdaUtils } from "./pda";
@@ -237,10 +236,10 @@ export class TickUtils {
    * @returns Aligned tick
    */
   static alignTickToSpacing(tick: number, tickSpacing: number, roundUp: boolean = false): number {
-    const aligned = roundUp 
+    const aligned = roundUp
       ? Math.ceil(tick / tickSpacing) * tickSpacing
       : Math.floor(tick / tickSpacing) * tickSpacing;
-    
+
     return Math.max(MIN_TICK, Math.min(MAX_TICK, aligned));
   }
 
@@ -257,8 +256,10 @@ export class TickUtils {
 }
 
 /**
+ * NOTE: Not Implemented
+ *
  * Fetch tick arrays for a pool within a price range
- * @param rpc - RPC client
+ * @param cluster - RPC cluster | endpoint
  * @param poolAddress - Pool address
  * @param tickLower - Lower tick of range
  * @param tickUpper - Upper tick of range
@@ -267,86 +268,13 @@ export class TickUtils {
  * @returns Promise of tick arrays
  */
 export async function fetchTickArraysForRange(
-  rpc: Rpc<any>,
+  cluster: ClusterUrl,
   poolAddress: Address,
   tickLower: number,
   tickUpper: number,
   tickSpacing: number,
   tickCurrent: number
 ): Promise<TickArray[]> {
-  const startIndices = TickUtils.getTickArrayStartIndices(
-    tickLower,
-    tickUpper,
-    tickSpacing,
-    tickCurrent
-  );
 
-  const tickArrayPdas = await Promise.all(
-    startIndices.map(index => 
-      PdaUtils.getTickArrayStatePda(poolAddress, index)
-    )
-  );
-
-  // Fetch tick array accounts
-  const tickArrayAccounts = await Promise.all(
-    tickArrayPdas.map(async pda => {
-      try {
-        const response = await rpc.getAccountInfo(pda[0]).send();
-        return response.value;
-      } catch (error) {
-        console.warn(`Failed to fetch tick array at ${pda[0]}:`, error);
-        return null;
-      }
-    })
-  );
-
-  // Parse tick arrays (you'll need to implement parsing based on your generated types)
-  const tickArrays: TickArray[] = [];
-  
-  for (let i = 0; i < tickArrayAccounts.length; i++) {
-    const account = tickArrayAccounts[i];
-    if (account?.data) {
-      // TODO: Parse account data using your generated decoder
-      // This would use your generated TickArrayState decoder
-      const parsed = parseTickArrayAccount(account.data);
-      if (parsed) {
-        tickArrays.push(parsed);
-      }
-    }
-  }
-
-  return tickArrays;
-}
-
-/**
- * Parse tick array account data
- * @param data - Raw account data
- * @returns Parsed tick array or null
- */
-function parseTickArrayAccount(data: Uint8Array): TickArray | null {
-  try {
-    // TODO: Implement using your generated TickArrayState decoder
-    // This is a placeholder - you'll need to use your actual generated decoder
-    
-    // Example structure:
-    // const decoded = getTickArrayStateDecoder().decode(data);
-    // return {
-    //   poolId: decoded.poolId,
-    //   startTickIndex: decoded.startTickIndex,
-    //   ticks: decoded.ticks.map(t => ({
-    //     tick: t.tick,
-    //     liquidityNet: t.liquidityNet,
-    //     liquidityGross: t.liquidityGross,
-    //     feeGrowthOutside0X64: t.feeGrowthOutside0X64,
-    //     feeGrowthOutside1X64: t.feeGrowthOutside1X64,
-    //     rewardGrowthsOutside: t.rewardGrowthsOutside
-    //   })),
-    //   initializedTickCount: decoded.initializedTickCount
-    // };
-    
-    return null; // Placeholder
-  } catch (error) {
-    console.warn('Failed to parse tick array account:', error);
-    return null;
-  }
+  return []
 }

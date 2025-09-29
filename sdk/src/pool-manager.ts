@@ -1,26 +1,12 @@
-/**
- * Pool Management Module
- * Handles pool queries and management operations
- */
-
 import {
   type Address,
-  type Rpc,
   type TransactionSigner,
-  type Instruction,
   address,
 } from "@solana/kit";
 import {
-  getCreatePoolInstruction,
   getCreateAmmConfigInstruction,
-  getUpdatePoolStatusInstruction,
-  fetchPoolState,
   fetchMaybePoolState,
-  fetchAmmConfig,
-  fetchAllPoolState,
-  type CreatePoolInput,
-  type CreateAmmConfigInput,
-  type UpdatePoolStatusInput,
+  getCreatePoolInstructionAsync,
 } from "./generated";
 
 import type {
@@ -32,14 +18,12 @@ import type {
 
 import { ClmmError, ClmmErrorCode } from "./types";
 import { PdaUtils } from "./utils/pda";
-import { MathUtils, SqrtPriceMath } from "./utils/math";
+import { SqrtPriceMath } from "./utils/math";
 
 import {
   FEE_TIERS,
   SYSTEM_PROGRAM_ID,
-  SYSVAR_RENT_PROGRAM_ID,
   TICK_SPACINGS,
-  ONE,
 } from "./constants";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import BN from "bn.js";
@@ -84,17 +68,11 @@ export class PoolManager {
     // Ensure correct token order
     const addressA = address(tokenMintA);
     const addressB = address(tokenMintB);
-    const isAFirst = Buffer.from(addressA).compare(Buffer.from(addressB)) < 0;
+    const isBFirst = Buffer.from(addressB).compare(Buffer.from(addressA)) > 0;
 
-    const [token0, token1, decimals0, decimals1, priceAdjusted] = isAFirst
-      ? [tokenMintA, tokenMintB, mintADecimals, mintBDecimals, initialPrice]
-      : [
-        tokenMintB,
-        tokenMintA,
-        mintBDecimals,
-        mintADecimals,
-        new Decimal(1).div(initialPrice),
-      ];
+    const [token0, token1, decimals0, decimals1, priceAdjusted] = isBFirst
+      ? [tokenMintB, tokenMintA, mintBDecimals, mintADecimals, new Decimal(1).div(initialPrice)]
+      : [tokenMintA, tokenMintB, mintADecimals, mintBDecimals, initialPrice];
 
     const initialPriceX64 = SqrtPriceMath.priceToSqrtPriceX64(
       priceAdjusted,
@@ -110,45 +88,43 @@ export class PoolManager {
     const [observationPda] = await PdaUtils.getObservationStatePda(poolPda);
     const [tickArrayBitmapPda] = await PdaUtils.getTickArrayBitmapExtensionPda(poolPda);
 
-    const [mintAVault] = await PdaUtils.getPoolVaultIdPda(
+    const [tokenVault0] = await PdaUtils.getPoolVaultIdPda(
       programId,
       poolPda,
-      tokenMintA,
+      token0,
     );
-    const [mintBVault] = await PdaUtils.getPoolVaultIdPda(
+    const [tokenVault1] = await PdaUtils.getPoolVaultIdPda(
       programId,
       poolPda,
-      tokenMintB,
+      token1,
     );
 
     // Create instruction
-    const instruction = getCreatePoolInstruction({
+    const instruction = await getCreatePoolInstructionAsync({
       poolCreator: owner,
       ammConfig: ammConfigId,
       poolState: poolPda,
       tokenMint0: token0,
       tokenMint1: token1,
-      tokenVault0: mintAVault,
-      tokenVault1: mintBVault,
+      tokenVault0: tokenVault0,
+      tokenVault1: tokenVault1,
       observationState: observationPda,
       tickArrayBitmap: tickArrayBitmapPda,
       tokenProgram0: TOKEN_PROGRAM_ADDRESS,
       tokenProgram1: TOKEN_PROGRAM_ADDRESS,
-      systemProgram: SYSTEM_PROGRAM_ID,
-      rent: SYSVAR_RENT_PROGRAM_ID,
       sqrtPriceX64: BigInt(initialPriceX64.toString()),
-      openTime: BigInt(Math.floor(Date.now() / 1000)),
+      openTime: BigInt(0),
     });
 
     return {
       instructions: [instruction],
-      signers: [owner],
+      signers: [],
       instructionTypes: ["CreatePool"],
       address: {
         poolId: poolPda,
         observationId: observationPda,
-        tokenVault0: mintAVault,
-        tokenVault1: mintBVault,
+        tokenVault0: tokenVault0,
+        tokenVault1: tokenVault1,
       },
       lookupTableAddress: [],
     };
@@ -239,7 +215,7 @@ export class PoolManager {
    * @param ammConfigIndex - AMM config index (default: 0)
    * @returns Pool information if found
    */
-  async findPool(
+  async getPoolByTokenPairAndConfig(
     tokenA: Address,
     tokenB: Address,
     ammConfigIndex: number = 0,

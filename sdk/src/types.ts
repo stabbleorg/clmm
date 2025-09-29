@@ -12,6 +12,7 @@ import type {
 } from "./generated";
 import BN from "bn.js";
 import Decimal from "decimal.js";
+import { MAX_TICK, MIN_TICK } from "./constants";
 
 // Core SDK Configuration
 export interface ClmmSdkConfig {
@@ -80,6 +81,17 @@ export interface TokenInfo {
   decimals: number;
   /** Logo URI */
   logoUri?: string;
+}
+
+export interface ClmmConfigInfo {
+  id: Address;
+  index: number;
+  protocolFeeRate: number;
+  tradeFeeRate: number;
+  tickSpacing: number;
+  fundFeeRate: number;
+  fundOwner: string;
+  description: string;
 }
 
 // Position Management Types

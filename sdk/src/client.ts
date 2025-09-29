@@ -1,14 +1,9 @@
-/**
- * Main CLMM SDK Client
- * Central entry point providing access to all SDK functionality
- */
-
 import type { ClmmSdkConfig } from './types';
 import { Clmm } from './clmm';
 import { PoolManager } from './pool-manager';
 import { PositionManager } from './position-manager';
-import { SwapManager } from './swap';
-import { RewardsManager } from './rewards';
+// import { SwapManager } from './swap';
+// import { RewardsManager } from './rewards';
 
 export class ClmmSdk {
   /** Core CLMM functionality (Raydium-style) */
@@ -21,10 +16,10 @@ export class ClmmSdk {
   public readonly positions: PositionManager;
 
   /** Swap functionality */
-  public readonly swap: SwapManager;
+  // public readonly swap: SwapManager;
 
   /** Rewards and fee collection functionality */
-  public readonly rewards: RewardsManager;
+  // public readonly rewards: RewardsManager;
 
   /** SDK configuration */
   public readonly config: ClmmSdkConfig;
@@ -34,8 +29,8 @@ export class ClmmSdk {
     this.clmm = new Clmm(config);
     this.pools = new PoolManager(config);
     this.positions = new PositionManager(config);
-    this.swap = new SwapManager(config);
-    this.rewards = new RewardsManager(config);
+    // this.swap = new SwapManager(config);
+    // this.rewards = new RewardsManager(config);
   }
 
   /**
