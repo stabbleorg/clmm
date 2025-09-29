@@ -19,7 +19,7 @@ import {
   ZERO,
 } from "../constants";
 
-export class MathUtil {
+export class MathUtils {
   public static mulDivRoundingUp(a: BN, b: BN, denominator: BN): BN {
     const numerator = a.mul(b);
     let result = numerator.div(denominator);
@@ -82,7 +82,7 @@ export class SqrtPriceMath {
     decimalsA: number,
     decimalsB: number,
   ): Decimal {
-    return MathUtil.x64ToDecimal(sqrtPriceX64)
+    return MathUtils.x64ToDecimal(sqrtPriceX64)
       .pow(2)
       .mul(Decimal.pow(10, decimalsA - decimalsB));
   }
@@ -92,7 +92,7 @@ export class SqrtPriceMath {
     decimalsA: number,
     decimalsB: number,
   ): BN {
-    return MathUtil.decimalToX64(
+    return MathUtils.decimalToX64(
       price.mul(Decimal.pow(10, decimalsB - decimalsA)).sqrt(),
     );
   }
@@ -112,17 +112,17 @@ export class SqrtPriceMath {
 
     return zeroForOne
       ? this.getNextSqrtPriceFromTokenAmountARoundingUp(
-          sqrtPriceX64,
-          liquidity,
-          amountIn,
-          true,
-        )
+        sqrtPriceX64,
+        liquidity,
+        amountIn,
+        true,
+      )
       : this.getNextSqrtPriceFromTokenAmountBRoundingDown(
-          sqrtPriceX64,
-          liquidity,
-          amountIn,
-          true,
-        );
+        sqrtPriceX64,
+        liquidity,
+        amountIn,
+        true,
+      );
   }
 
   public static getNextSqrtPriceX64FromOutput(
@@ -140,17 +140,17 @@ export class SqrtPriceMath {
 
     return zeroForOne
       ? this.getNextSqrtPriceFromTokenAmountBRoundingDown(
-          sqrtPriceX64,
-          liquidity,
-          amountOut,
-          false,
-        )
+        sqrtPriceX64,
+        liquidity,
+        amountOut,
+        false,
+      )
       : this.getNextSqrtPriceFromTokenAmountARoundingUp(
-          sqrtPriceX64,
-          liquidity,
-          amountOut,
-          false,
-        );
+        sqrtPriceX64,
+        liquidity,
+        amountOut,
+        false,
+      );
   }
 
   private static getNextSqrtPriceFromTokenAmountARoundingUp(
@@ -166,9 +166,9 @@ export class SqrtPriceMath {
       const numerator1 = liquidityLeftShift;
       const denominator = liquidityLeftShift.add(amount.mul(sqrtPriceX64));
       if (denominator.gte(numerator1)) {
-        return MathUtil.mulDivCeil(numerator1, sqrtPriceX64, denominator);
+        return MathUtils.mulDivCeil(numerator1, sqrtPriceX64, denominator);
       }
-      return MathUtil.mulDivRoundingUp(
+      return MathUtils.mulDivRoundingUp(
         numerator1,
         ONE,
         numerator1.div(sqrtPriceX64).add(amount),
@@ -181,7 +181,7 @@ export class SqrtPriceMath {
         );
       }
       const denominator = liquidityLeftShift.sub(amountMulSqrtPrice);
-      return MathUtil.mulDivCeil(liquidityLeftShift, sqrtPriceX64, denominator);
+      return MathUtils.mulDivCeil(liquidityLeftShift, sqrtPriceX64, denominator);
     }
   }
 
@@ -195,7 +195,7 @@ export class SqrtPriceMath {
     if (add) {
       return sqrtPriceX64.add(deltaY.div(liquidity));
     } else {
-      const amountDivLiquidity = MathUtil.mulDivRoundingUp(
+      const amountDivLiquidity = MathUtils.mulDivRoundingUp(
         deltaY,
         ONE,
         liquidity,
@@ -393,14 +393,14 @@ export class LiquidityMath {
     const numerator2 = sqrtPriceX64B.sub(sqrtPriceX64A);
 
     return roundUp
-      ? MathUtil.mulDivRoundingUp(
-          MathUtil.mulDivCeil(numerator1, numerator2, sqrtPriceX64B),
-          ONE,
-          sqrtPriceX64A,
-        )
-      : MathUtil.mulDivFloor(numerator1, numerator2, sqrtPriceX64B).div(
-          sqrtPriceX64A,
-        );
+      ? MathUtils.mulDivRoundingUp(
+        MathUtils.mulDivCeil(numerator1, numerator2, sqrtPriceX64B),
+        ONE,
+        sqrtPriceX64A,
+      )
+      : MathUtils.mulDivFloor(numerator1, numerator2, sqrtPriceX64B).div(
+        sqrtPriceX64A,
+      );
   }
 
   public static getTokenAmountBFromLiquidity(
@@ -417,8 +417,8 @@ export class LiquidityMath {
     }
 
     return roundUp
-      ? MathUtil.mulDivCeil(liquidity, sqrtPriceX64B.sub(sqrtPriceX64A), Q64)
-      : MathUtil.mulDivFloor(liquidity, sqrtPriceX64B.sub(sqrtPriceX64A), Q64);
+      ? MathUtils.mulDivCeil(liquidity, sqrtPriceX64B.sub(sqrtPriceX64A), Q64)
+      : MathUtils.mulDivFloor(liquidity, sqrtPriceX64B.sub(sqrtPriceX64A), Q64);
   }
 
   public static getLiquidityFromTokenAmountA(
@@ -436,7 +436,7 @@ export class LiquidityMath {
     const result = numerator.div(denominator);
 
     if (roundUp) {
-      return MathUtil.mulDivRoundingUp(result, ONE, MaxU64);
+      return MathUtils.mulDivRoundingUp(result, ONE, MaxU64);
     } else {
       return result.shrn(U64Resolution);
     }
@@ -450,7 +450,7 @@ export class LiquidityMath {
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
       [sqrtPriceX64A, sqrtPriceX64B] = [sqrtPriceX64B, sqrtPriceX64A];
     }
-    return MathUtil.mulDivFloor(
+    return MathUtils.mulDivFloor(
       amountB,
       MaxU64,
       sqrtPriceX64B.sub(sqrtPriceX64A),

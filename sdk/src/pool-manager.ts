@@ -32,7 +32,8 @@ import type {
 
 import { ClmmError, ClmmErrorCode } from "./types";
 import { PdaUtils } from "./utils/pda";
-import { MathUtils } from "./utils/math";
+import { MathUtils, SqrtPriceMath } from "./utils/math";
+
 import {
   FEE_TIERS,
   SYSTEM_PROGRAM_ID,
@@ -45,7 +46,7 @@ import BN from "bn.js";
 import Decimal from "decimal.js";
 
 export class PoolManager {
-  constructor(private readonly config: ClmmSdkConfig) {}
+  constructor(private readonly config: ClmmSdkConfig) { }
 
   /**
    * Make create pool instructions
@@ -88,14 +89,14 @@ export class PoolManager {
     const [token0, token1, decimals0, decimals1, priceAdjusted] = isAFirst
       ? [tokenMintA, tokenMintB, mintADecimals, mintBDecimals, initialPrice]
       : [
-          tokenMintB,
-          tokenMintA,
-          mintBDecimals,
-          mintADecimals,
-          new Decimal(1).div(initialPrice),
-        ];
+        tokenMintB,
+        tokenMintA,
+        mintBDecimals,
+        mintADecimals,
+        new Decimal(1).div(initialPrice),
+      ];
 
-    const initialPriceX64 = MathUtils.priceToSqrtPriceX64(
+    const initialPriceX64 = SqrtPriceMath.priceToSqrtPriceX64(
       priceAdjusted,
       decimals0,
       decimals1,
@@ -135,7 +136,7 @@ export class PoolManager {
       tokenProgram1: TOKEN_PROGRAM_ADDRESS,
       systemProgram: SYSTEM_PROGRAM_ID,
       rent: SYSVAR_RENT_PROGRAM_ID,
-      sqrtPriceX64: initialPriceX64,
+      sqrtPriceX64: BigInt(initialPriceX64.toString()),
       openTime: BigInt(Math.floor(Date.now() / 1000)),
     });
 
@@ -172,7 +173,6 @@ export class PoolManager {
     }>
   > {
     const {
-      programId,
       owner,
       index,
       tickSpacing,
@@ -187,7 +187,7 @@ export class PoolManager {
     const instruction = getCreateAmmConfigInstruction({
       owner,
       ammConfig: ammConfigPda[0],
-      systemProgram: "11111111111111111111111111111111",
+      systemProgram: SYSTEM_PROGRAM_ID,
       index,
       tickSpacing,
       tradeFeeRate,
@@ -233,17 +233,15 @@ export class PoolManager {
   }
 
   /**
-   * Find pool by token pair and fee tier
+   * Find pool by token pair and config index
    * @param tokenA - First token mint
    * @param tokenB - Second token mint
-   * @param fee - Fee tier
    * @param ammConfigIndex - AMM config index (default: 0)
    * @returns Pool information if found
    */
   async findPool(
     tokenA: Address,
     tokenB: Address,
-    fee: number,
     ammConfigIndex: number = 0,
   ): Promise<PoolInfo | null> {
     const ammConfigPda = await PdaUtils.getAmmConfigPda(ammConfigIndex);
@@ -257,49 +255,11 @@ export class PoolManager {
   }
 
   /**
-   * Get all pools for a token pair
-   * @param tokenA - First token mint
-   * @param tokenB - Second token mint
-   * @returns Array of pools for the token pair
-   */
-  async getPoolsForTokenPair(
-    tokenA: Address,
-    tokenB: Address,
-  ): Promise<PoolInfo[]> {
-    const pools: PoolInfo[] = [];
-
-    // Check all common fee tiers
-    for (const fee of Object.values(FEE_TIERS)) {
-      try {
-        const pool = await this.findPool(tokenA, tokenB, fee);
-        if (pool) {
-          pools.push(pool);
-        }
-      } catch {
-        // Pool doesn't exist for this fee tier, continue
-      }
-    }
-
-    return pools;
-  }
-
-  /**
-   * Get all pools (paginated)
-   * @param offset - Pagination offset
-   * @param limit - Number of pools to fetch
+   * Get all pools
    * @returns Array of pool information
    */
-  async getAllPools(
-    offset: number = 0,
-    limit: number = 100,
-  ): Promise<PoolInfo[]> {
-    // This is a simplified implementation
-    // In practice, you'd need to implement proper pagination
-    // by maintaining an index of all pool addresses
-
+  async getAllPools(): Promise<PoolInfo[]> {
     try {
-      // This would require an indexer or maintaining a registry
-      // For now, return empty array as this requires additional infrastructure
       return [];
     } catch (error) {
       throw new ClmmError(
@@ -307,27 +267,6 @@ export class PoolManager {
         `Failed to fetch pools: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     }
-  }
-
-  /**
-   * Update pool status (admin only)
-   * @param poolAddress - Pool address
-   * @param status - New status flags
-   * @param authority - Pool authority
-   * @returns Update instruction
-   */
-  async updatePoolStatus(
-    poolAddress: Address,
-    status: number,
-    authority: TransactionSigner,
-  ): Promise<Instruction> {
-    const input: UpdatePoolStatusInput = {
-      authority,
-      poolState: poolAddress,
-      status,
-    };
-
-    return getUpdatePoolStatusInstruction(input);
   }
 
   /**
@@ -342,14 +281,13 @@ export class PoolManager {
     decimalsA: number,
     decimalsB: number,
   ): Decimal {
-    return MathUtils.sqrtPriceX64ToPrice(sqrtPriceX64, decimalsA, decimalsB);
+    return SqrtPriceMath.sqrtPriceX64ToPrice(sqrtPriceX64, decimalsA, decimalsB);
   }
 
   /**
    * Enrich pool state with calculated fields
    */
   private enrichPoolInfo(poolState: any): PoolInfo {
-    // This would be enhanced with real token metadata and pricing data
     const tokenA: TokenInfo = {
       mint: poolState.tokenMint0,
       symbol: "TOKEN_A", // Would fetch from metadata

@@ -1,13 +1,7 @@
-/**
- * Position Management Module  
- * Handles position queries and utility operations
- */
-
 import {
   Account,
   generateKeyPairSigner,
   type Address,
-  type Instruction,
   type TransactionSigner,
 } from "@solana/kit";
 
@@ -16,31 +10,24 @@ import {
   getIncreaseLiquidityV2Instruction,
   getDecreaseLiquidityV2Instruction,
   getClosePositionInstruction,
-  fetchPersonalPositionState,
   fetchMaybePersonalPositionState,
-  type OpenPositionV2AsyncInput,
-  type IncreaseLiquidityV2Input,
-  type DecreaseLiquidityV2Input,
-  type ClosePositionInput,
   PersonalPositionState,
+  PoolState,
 } from "./generated";
 
 import type {
   ClmmSdkConfig,
   PositionInfo,
-  TickRange,
-  PriceRange,
   MakeInstructionResult,
 } from "./types";
 
 import { ClmmError, ClmmErrorCode } from "./types";
-import { PdaUtils, TickUtils, getMetadataPda } from "./utils/pda";
-import { MathUtils } from "./utils/math";
-import { MIN_TICK, MAX_TICK } from "./constants";
+import { PdaUtils, getMetadataPda } from "./utils/pda";
 import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda } from "@solana-program/token";
+import { getFakeSigner, TickUtils } from "./utils";
 
 export class PositionManager {
-  constructor(private readonly config: ClmmSdkConfig) {}
+  constructor(private readonly config: ClmmSdkConfig) { }
 
   /**
    * Make open position V2 instructions
@@ -49,7 +36,7 @@ export class PositionManager {
    */
   static async makeOpenPositionV2Instructions(params: {
     programId: Address;
-    poolId: Address;
+    poolAccount: Account<PoolState, Address>
     ownerInfo: {
       feePayer: TransactionSigner;
       wallet: Address;
@@ -73,8 +60,7 @@ export class PositionManager {
     }>
   > {
     const {
-      programId,
-      poolId,
+      poolAccount,
       ownerInfo,
       tickLower,
       tickUpper,
@@ -85,39 +71,47 @@ export class PositionManager {
       getEphemeralSigners,
     } = params;
 
+    const signers: TransactionSigner[] = [];
+
     // Generate position NFT mint
-    const positionMint = getEphemeralSigners
-      ? getEphemeralSigners()[0]
-      : await generateKeyPairSigner();
-
-    // Derive position state PDA
-    const positionStatePda = await PdaUtils.getPositionStatePda(
-      positionMint.address,
-    );
-
-    // Get metadata PDA
-    const metadataPda = await getMetadataPda(positionMint.address);
-
-    // Get position NFT token account
-    const positionNftAccountPda = await findAssociatedTokenPda({
-      mint: positionMint.address,
-      owner: ownerInfo.wallet,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
-    });
+    let nftMintAccount: TransactionSigner;
+    if (getEphemeralSigners) {
+      nftMintAccount = getEphemeralSigners()[0];
+    } else {
+      let k = await generateKeyPairSigner();
+      signers.push(k)
+      nftMintAccount = k;
+    }
 
     // Get tick array start indices
     const tickArrayLowerStartIndex = TickUtils.getTickArrayStartIndex(
       tickLower,
-      60,
-    ); // Assuming tick spacing 60
+      poolAccount.data.tickSpacing,
+    );
     const tickArrayUpperStartIndex = TickUtils.getTickArrayStartIndex(
       tickUpper,
-      60,
+      poolAccount.data.tickSpacing,
     );
 
-    // Get protocol position (simplified for now)
-    const protocolPositionPda = await PdaUtils.getProtocolPositionStatePda(
-      poolId,
+    // Derive position state PDA
+    const [positionStatePda] = await PdaUtils.getPositionStatePda(
+      nftMintAccount.address,
+    );
+
+    // Get metadata PDA
+    const [metadataPda] = await getMetadataPda(nftMintAccount.address);
+
+    // Get position NFT token account
+    const [positionNftAccountPda] = await findAssociatedTokenPda({
+      mint: nftMintAccount.address,
+      owner: ownerInfo.wallet,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+
+
+    // Get protocol position
+    const [protocolPositionPda] = await PdaUtils.getProtocolPositionStatePda(
+      poolAccount.address,
       tickLower,
       tickUpper,
     );
@@ -125,18 +119,17 @@ export class PositionManager {
     const instruction = await getOpenPositionV2InstructionAsync({
       payer: ownerInfo.feePayer,
       positionNftOwner: ownerInfo.wallet,
-      positionNftMint: positionMint,
-      positionNftAccount: positionNftAccountPda[0],
-      metadataAccount: metadataPda[0],
-      poolState: poolId,
-      protocolPosition: protocolPositionPda[0],
-      personalPosition: positionStatePda[0],
+      positionNftMint: nftMintAccount,
+      positionNftAccount: positionNftAccountPda,
+      metadataAccount: metadataPda,
+      poolState: poolAccount.address,
+      protocolPosition: protocolPositionPda,
       tokenAccount0: ownerInfo.tokenAccountA,
       tokenAccount1: ownerInfo.tokenAccountB,
-      tokenVault0: poolId, // Simplified - should be actual vault
-      tokenVault1: poolId, // Simplified - should be actual vault
-      vault0Mint: "11111111111111111111111111111111", // Should be actual mint
-      vault1Mint: "11111111111111111111111111111111", // Should be actual mint
+      tokenVault0: poolAccount.data.tokenVault0,
+      tokenVault1: poolAccount.data.tokenVault1,
+      vault0Mint: poolAccount.data.tokenMint0,
+      vault1Mint: poolAccount.data.tokenMint0,
       tickLowerIndex: tickLower,
       tickUpperIndex: tickUpper,
       tickArrayLowerStartIndex,
@@ -150,13 +143,13 @@ export class PositionManager {
 
     return {
       instructions: [instruction],
-      signers: [ownerInfo.feePayer, positionMint],
+      signers,
       instructionTypes: ["OpenPositionV2"],
       address: {
-        positionNftMint: positionMint.address,
-        positionNftAccount: positionNftAccountPda[0],
-        metadataAccount: metadataPda[0],
-        personalPosition: positionStatePda[0],
+        positionNftMint: nftMintAccount.address,
+        positionNftAccount: positionNftAccountPda,
+        metadataAccount: metadataPda,
+        personalPosition: positionStatePda,
       },
       lookupTableAddress: [],
     };
@@ -169,10 +162,8 @@ export class PositionManager {
    */
   static async makeIncreaseLiquidityV2Instructions(params: {
     programId: Address;
-    positionNftMint: Address;
-    positionNftAccount: Address;
-    personalPosition: Address;
-    poolId: Address;
+    ownerPosition: Account<PersonalPositionState>,
+    poolState: Account<PoolState, Address>;
     ownerInfo: {
       wallet: Address;
       tokenAccountA: Address;
@@ -183,41 +174,69 @@ export class PositionManager {
     amountMaxB: bigint;
   }): Promise<MakeInstructionResult<{}>> {
     const {
-      positionNftMint,
-      positionNftAccount,
-      personalPosition,
-      poolId,
+      ownerPosition,
+      poolState,
       ownerInfo,
       liquidity,
       amountMaxA,
       amountMaxB,
     } = params;
 
-    // Create a placeholder signer - in practice this would be provided
-    const ownerSigner = await generateKeyPairSigner();
+    // Create a fake owner signer - used only to build the ix
+    const fakeNftOwnerSigner = getFakeSigner(ownerInfo.wallet)
+
+    const [personalPosition] = await PdaUtils.getPositionStatePda(ownerPosition.data.nftMint);
+    const [positionNftAccount] = await findAssociatedTokenPda({
+      mint: ownerPosition.data.nftMint,
+      owner: ownerInfo.wallet,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+
+    // Get protocol position
+    const [protocolPositionPda] = await PdaUtils.getProtocolPositionStatePda(
+      poolState.address,
+      ownerPosition.data.tickLowerIndex,
+      ownerPosition.data.tickUpperIndex,
+    );
+
+    // Get tick arrays for lower and upper ticks
+    const [tickArrayLower] = await PdaUtils.getTickArrayStatePda(
+      poolState.address,
+      PdaUtils.getTickArrayStartIndex(ownerPosition.data.tickLowerIndex, poolState.data.tickSpacing),
+    );
+
+    const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
+      poolState.address,
+      PdaUtils.getTickArrayStartIndex(ownerPosition.data.tickUpperIndex, poolState.data.tickSpacing),
+    );
 
     const instruction = getIncreaseLiquidityV2Instruction({
-      nftOwner: ownerSigner,
+      nftOwner: fakeNftOwnerSigner,
       nftAccount: positionNftAccount,
       personalPosition,
-      poolState: poolId,
-      protocolPosition: poolId, // Simplified - should be actual protocol position
+      poolState: poolState.address,
+      protocolPosition: protocolPositionPda,
+      tickArrayLower,
+      tickArrayUpper,
       tokenAccount0: ownerInfo.tokenAccountA,
       tokenAccount1: ownerInfo.tokenAccountB,
-      tokenVault0: poolId, // Simplified - should be actual vault
-      tokenVault1: poolId, // Simplified - should be actual vault
+      tokenVault0: poolState.data.tokenVault0,
+      tokenVault1: poolState.data.tokenVault1,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      vault0Mint: poolState.data.tokenMint0,
+      vault1Mint: poolState.data.tokenMint1,
       liquidity,
       amount0Max: amountMaxA,
       amount1Max: amountMaxB,
+      baseFlag: null, // Optional field - using null for now
     });
 
     return {
       instructions: [instruction],
-      signers: [ownerSigner],
+      signers: [],
       instructionTypes: ["IncreaseLiquidityV2"],
-      address: {},
-      lookupTableAddress: [],
+      address: { tickArrayLower, tickArrayUpper, positionNftAccount, personalPosition, protocolPositionPda },
+      lookupTableAddress: [], // TODO:
     };
   }
 
@@ -228,10 +247,8 @@ export class PositionManager {
    */
   static async makeDecreaseLiquidityV2Instructions(params: {
     programId: Address;
-    positionNftMint: Address;
-    positionNftAccount: Address;
-    personalPosition: Address;
-    poolId: Address;
+    ownerPosition: Account<PersonalPositionState>,
+    poolState: Account<PoolState, Address>;
     ownerInfo: {
       wallet: Address;
       tokenAccountA: Address;
@@ -242,30 +259,57 @@ export class PositionManager {
     amountMinB: bigint;
   }): Promise<MakeInstructionResult<{}>> {
     const {
-      positionNftMint,
-      positionNftAccount,
-      personalPosition,
-      poolId,
+      ownerPosition,
+      poolState,
       ownerInfo,
       liquidity,
       amountMinA,
       amountMinB,
     } = params;
 
-    // Create a placeholder signer - in practice this would be provided
-    const ownerSigner = await generateKeyPairSigner();
+    // Create a fake owner signer - used only to build the ix
+    const fakeNftOwnerSigner = getFakeSigner(ownerInfo.wallet)
+
+    const [personalPosition] = await PdaUtils.getPositionStatePda(ownerPosition.data.nftMint);
+    const [positionNftAccount] = await findAssociatedTokenPda({
+      mint: ownerPosition.data.nftMint,
+      owner: ownerInfo.wallet,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+
+    // Get protocol position
+    const [protocolPositionPda] = await PdaUtils.getProtocolPositionStatePda(
+      poolState.address,
+      ownerPosition.data.tickLowerIndex,
+      ownerPosition.data.tickUpperIndex,
+    );
+
+    // Get tick arrays for lower and upper ticks
+    const [tickArrayLower] = await PdaUtils.getTickArrayStatePda(
+      poolState.address,
+      PdaUtils.getTickArrayStartIndex(ownerPosition.data.tickLowerIndex, poolState.data.tickSpacing),
+    );
+
+    const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
+      poolState.address,
+      PdaUtils.getTickArrayStartIndex(ownerPosition.data.tickUpperIndex, poolState.data.tickSpacing),
+    );
 
     const instruction = getDecreaseLiquidityV2Instruction({
-      nftOwner: ownerSigner,
+      nftOwner: fakeNftOwnerSigner,
       nftAccount: positionNftAccount,
       personalPosition,
-      poolState: poolId,
-      protocolPosition: poolId, // Simplified - should be actual protocol position
-      tokenAccount0: ownerInfo.tokenAccountA,
-      tokenAccount1: ownerInfo.tokenAccountB,
-      tokenVault0: poolId, // Simplified - should be actual vault
-      tokenVault1: poolId, // Simplified - should be actual vault
+      poolState: poolState.address,
+      protocolPosition: protocolPositionPda,
+      tokenVault0: poolState.data.tokenVault0,
+      tokenVault1: poolState.data.tokenVault1,
+      tickArrayLower,
+      tickArrayUpper,
+      recipientTokenAccount0: ownerInfo.tokenAccountA,
+      recipientTokenAccount1: ownerInfo.tokenAccountB,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      vault0Mint: poolState.data.tokenMint0,
+      vault1Mint: poolState.data.tokenMint1,
       liquidity,
       amount0Min: amountMinA,
       amount1Min: amountMinB,
@@ -273,144 +317,55 @@ export class PositionManager {
 
     return {
       instructions: [instruction],
-      signers: [ownerSigner],
+      signers: [],
       instructionTypes: ["DecreaseLiquidityV2"],
-      address: {},
+      address: { tickArrayLower, tickArrayUpper, positionNftAccount, personalPosition, protocolPositionPda },
       lookupTableAddress: [],
     };
   }
 
-  // /**
-  //  * Open a new liquidity position
-  //  * @param params - Position parameters
-  //  * @returns Position opening instruction
-  //  */
-  // async openPosition(wallet: TransactionSigner, params: AddLiquidityParams, nft2022?: boolean = false): Promise<{
-  //   instruction: Instruction;
-  //   positionMint: Address;
-  // }> {
-  //   const {
-  //     poolAddress,
-  //     tickLower,
-  //     tickUpper,
-  //     amountA,
-  //     amountB,
-  //     minAmountA,
-  //     minAmountB,
-  //   } = params;
-  //
-  //   // Validate tick range
-  //   this.validateTickRange(tickLower, tickUpper);
-  //
-  //
-  //   // ? getATAAddress(ownerInfo.wallet, nftMintAccount, TOKEN_2022_PROGRAM_ID)
-  //   // : getATAAddress(ownerInfo.wallet, nftMintAccount, TOKEN_PROGRAM_ID);
-  //
-  //   // Get pool info to determine current state
-  //   const poolState = await this.getPoolState(poolAddress);
-  //
-  //   // Calculate liquidity from amounts
-  //   const liquidity = MathUtils.getLiquidityFromAmounts(
-  //     amountA,
-  //     amountB,
-  //     tickLower,
-  //     tickUpper,
-  //     poolState.tickCurrent
-  //   );
-  //
-  //   // Derive all required PDAs
-  //   const [positionStatePda, protocolPositionPda, tickArrayLowerPda, tickArrayUpperPda] = await Promise.all([
-  //     PdaUtils.getPositionStatePda(positionMint.address),
-  //     PdaUtils.getProtocolPositionStatePda(poolAddress, tickLower, tickUpper),
-  //     PdaUtils.getTickArrayStatePda(
-  //       poolAddress,
-  //       PdaUtils.getTickArrayStartIndex(tickLower, poolState.tickSpacing)
-  //     ),
-  //     PdaUtils.getTickArrayStatePda(
-  //       poolAddress,
-  //       PdaUtils.getTickArrayStartIndex(tickUpper, poolState.tickSpacing)
-  //     )
-  //   ]);
-  //
-  //   //   liquidity: new BN(0),
-  //   //   amountMaxA: base === "MintA" ? baseAmount : otherAmountMax,
-  //   //   amountMaxB: base === "MintA" ? otherAmountMax : baseAmount,
-  //   //   withMetadata: withMetadata === "create",
-  //   //   baseFlag: base === "MintA",
-  //   //   optionBaseFlag: 1,
-  //
-  //   const input: OpenPositionInput = {
-  //     payer: wallet,
-  //     positionNftOwner: wallet.address,
-  //     positionNftMint: positionMint,
-  //     positionNftAccount,
-  //     metadataAccount: '', // Will be derived
-  //     poolState: poolAddress,
-  //     protocolPosition: protocolPositionPda[0],
-  //     tickArrayLower: tickArrayLowerPda[0],
-  //     tickArrayUpper: tickArrayUpperPda[0],
-  //     personalPosition: positionStatePda[0],
-  //     tokenAccount0: '', // User's token A account
-  //     tokenAccount1: '', // User's token B account
-  //     tokenVault0: poolState.tokenVault0,
-  //     tokenVault1: poolState.tokenVault1,
-  //     tickLowerIndex: tickLower,
-  //     tickUpperIndex: tickUpper,
-  //     tickArrayLowerStartIndex: PdaUtils.getTickArrayStartIndex(tickLower, poolState.tickSpacing),
-  //     tickArrayUpperStartIndex: PdaUtils.getTickArrayStartIndex(tickUpper, poolState.tickSpacing),
-  //     liquidity,
-  //     amount0Max: amountA,
-  //     amount1Max: amountB,
-  //   };
-  //
-  //   const instruction = getOpenPositionInstruction(input);
-  //
-  //   return {
-  //     instruction,
-  //     positionMint,
-  //   };
-  // }
-
-
-
-
   /**
-   * Close a position (remove all liquidity and collect fees)
-   * @param positionMint - Position NFT mint
-   * @param wallet - User wallet
-   * @returns Close position instruction
+   * Make close position instructions
+   * @param params - Close position parameters
+   * @returns Instruction result following established pattern
    */
-  async closePosition(
-    positionMint: Address,
-    wallet: TransactionSigner,
-  ): Promise<Instruction> {
-    const position = await this.getPosition(positionMint);
-
-    if (!position) {
-      throw new ClmmError(
-        ClmmErrorCode.POSITION_NOT_FOUND,
-        "Position does not exist",
-      );
-    }
-
-    // Ensure position has no liquidity
-    if (position.liquidity > 0n) {
-      throw new ClmmError(
-        ClmmErrorCode.CLOSE_POSITION_ERR,
-        "Must remove all liquidity before closing position",
-      );
-    }
-
-    const positionStatePda = await PdaUtils.getPositionStatePda(positionMint);
-
-    const input: ClosePositionInput = {
-      nftOwner: wallet,
-      positionNftMint: positionMint,
-      positionNftAccount: "", // Position NFT token account
-      personalPosition: positionStatePda[0],
+  static async makeClosePositionInstructions(params: {
+    programId: Address;
+    ownerPosition: Account<PersonalPositionState>;
+    ownerInfo: {
+      wallet: Address;
     };
+  }): Promise<MakeInstructionResult<{}>> {
+    const {
+      ownerPosition,
+      ownerInfo,
+    } = params;
 
-    return getClosePositionInstruction(input);
+    // Create a fake owner signer - used only to build the ix
+    const fakeNftOwnerSigner = getFakeSigner(ownerInfo.wallet);
+
+    const [personalPosition] = await PdaUtils.getPositionStatePda(ownerPosition.data.nftMint);
+    const [positionNftAccount] = await findAssociatedTokenPda({
+      mint: ownerPosition.data.nftMint,
+      owner: ownerInfo.wallet,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+
+    const instruction = getClosePositionInstruction({
+      nftOwner: fakeNftOwnerSigner,
+      positionNftMint: ownerPosition.data.nftMint,
+      positionNftAccount,
+      personalPosition,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+
+    return {
+      instructions: [instruction],
+      signers: [],
+      instructionTypes: ["ClosePosition"],
+      address: { positionNftAccount, personalPosition },
+      lookupTableAddress: [],
+    };
   }
 
   /**
@@ -418,7 +373,7 @@ export class PositionManager {
    * @param positionMint - Position NFT mint
    * @returns Position information
    */
-  async getPosition(positionMint: Address): Promise<PositionInfo | null> {
+  async getPosition(positionMint: Address): Promise<PersonalPositionState | null> {
     try {
       const positionStatePda = await PdaUtils.getPositionStatePda(positionMint);
       const positionState = await fetchMaybePersonalPositionState(
@@ -431,7 +386,8 @@ export class PositionManager {
         return null;
       }
 
-      return this.enrichPositionInfo(positionState.data);
+      return positionState.data;
+      // return this.enrichPositionInfo(positionState.data);
     } catch (error) {
       throw new ClmmError(
         ClmmErrorCode.POSITION_NOT_FOUND,
@@ -446,179 +402,151 @@ export class PositionManager {
    * @returns Array of positions owned by the wallet
    */
   async getPositionsForWallet(wallet: Address): Promise<PositionInfo[]> {
-    // This would require indexing all position NFTs owned by the wallet
-    // Implementation would depend on external indexer or on-chain scanning
-    // For now, return empty array as this requires additional infrastructure
+    // TODO: 
     return [];
   }
 
-  /**
-   * Calculate position value in terms of underlying tokens
-   * @param positionMint - Position NFT mint
-   * @returns Token amounts and USD value
-   */
-  async calculatePositionValue(positionMint: Address): Promise<{
-    amount0: bigint;
-    amount1: bigint;
-    valueUsd?: number;
-  }> {
-    const position = await this.getPosition(positionMint);
-    if (!position) {
-      throw new ClmmError(
-        ClmmErrorCode.POSITION_NOT_FOUND,
-        "Position does not exist",
-      );
-    }
+  //
+  // NOTE: Currently Disabled
+  //
+  // /**
+  //  * Calculate position value in terms of underlying tokens
+  //  * @param positionMint - Position NFT mint
+  //  * @returns Token amounts and USD value
+  //  */
+  // async calculatePositionValue(positionMint: Address): Promise<{
+  //   amount0: bigint;
+  //   amount1: bigint;
+  //   valueUsd?: number;
+  // }> {
+  //   const position = await this.getPosition(positionMint);
+  //   if (!position) {
+  //     throw new ClmmError(
+  //       ClmmErrorCode.POSITION_NOT_FOUND,
+  //       "Position does not exist",
+  //     );
+  //   }
+  //
+  //   const poolState = await this.getPoolState(position.poolId);
+  //
+  //   const [amount0, amount1] = MathUtils.getAmountsFromLiquidity(
+  //     position.liquidity,
+  //     Number(position.tickLowerIndex),
+  //     Number(position.tickUpperIndex),
+  //     poolState.tickCurrent,
+  //   );
+  //
+  //   return {
+  //     amount0,
+  //     amount1,
+  //     // valueUsd would be calculated with external price data
+  //     valueUsd: undefined,
+  //   };
+  // }
 
-    const poolState = await this.getPoolState(position.poolId);
+  //
+  // NOTE: Currently Disabled
+  //
+  // /**
+  //  * Convert price range to tick range
+  //  * @param priceRange - Price range
+  //  * @param tickSpacing - Pool tick spacing
+  //  * @returns Tick range
+  //  */
+  // priceRangeToTickRange(
+  //   priceRange: PriceRange,
+  //   tickSpacing: number,
+  //   decimalsA: number,
+  //   decimalsB: number,
+  // ): TickRange {
+  //   const lowerSqrtPrice = SqrtPriceMath.priceToSqrtPriceX64(
+  //     priceRange.lower,
+  //     decimalsA,
+  //     decimalsB,
+  //   );
+  //   const upperSqrtPrice = MathUtils.priceToSqrtPriceX64(
+  //     priceRange.upper,
+  //     decimalsA,
+  //     decimalsB,
+  //   );
+  //
+  //   const lowerTick = MathUtils.alignTickToSpacing(
+  //     MathUtils.sqrtPriceX64ToTick(lowerSqrtPrice),
+  //     tickSpacing,
+  //   );
+  //   const upperTick = MathUtils.alignTickToSpacing(
+  //     MathUtils.sqrtPriceX64ToTick(upperSqrtPrice),
+  //     tickSpacing,
+  //   );
+  //
+  //   return {
+  //     lower: lowerTick,
+  //     upper: upperTick,
+  //   };
+  // }
 
-    const [amount0, amount1] = MathUtils.getAmountsFromLiquidity(
-      position.liquidity,
-      Number(position.tickLowerIndex),
-      Number(position.tickUpperIndex),
-      poolState.tickCurrent,
-    );
+  //
+  // NOTE: Disabled
+  //
+  // /**
+  //  * Convert tick range to price range
+  //  * @param tickRange - Tick range
+  //  * @returns Price range
+  //  */
+  // tickRangeToPriceRange(
+  //   tickRange: TickRange,
+  //   decimalsA: number,
+  //   decimalsB: number,
+  // ): PriceRange {
+  //   const lowerSqrtPrice = MathUtils.tickToSqrtPriceX64(tickRange.lower);
+  //   const upperSqrtPrice = MathUtils.tickToSqrtPriceX64(tickRange.upper);
+  //
+  //   return {
+  //     lower: MathUtils.sqrtPriceX64ToPrice(
+  //       lowerSqrtPrice,
+  //       decimalsA,
+  //       decimalsB,
+  //     ),
+  //     upper: MathUtils.sqrtPriceX64ToPrice(
+  //       upperSqrtPrice,
+  //       decimalsA,
+  //       decimalsB,
+  //     ),
+  //   };
+  // }
 
-    return {
-      amount0,
-      amount1,
-      // valueUsd would be calculated with external price data
-      valueUsd: undefined,
-    };
-  }
-
-  /**
-   * Convert price range to tick range
-   * @param priceRange - Price range
-   * @param tickSpacing - Pool tick spacing
-   * @returns Tick range
-   */
-  priceRangeToTickRange(
-    priceRange: PriceRange,
-    tickSpacing: number,
-    decimalsA: number,
-    decimalsB: number,
-  ): TickRange {
-    const lowerSqrtPrice = MathUtils.priceToSqrtPriceX64(
-      priceRange.lower,
-      decimalsA,
-      decimalsB,
-    );
-    const upperSqrtPrice = MathUtils.priceToSqrtPriceX64(
-      priceRange.upper,
-      decimalsA,
-      decimalsB,
-    );
-
-    const lowerTick = MathUtils.alignTickToSpacing(
-      MathUtils.sqrtPriceX64ToTick(lowerSqrtPrice),
-      tickSpacing,
-    );
-    const upperTick = MathUtils.alignTickToSpacing(
-      MathUtils.sqrtPriceX64ToTick(upperSqrtPrice),
-      tickSpacing,
-    );
-
-    return {
-      lower: lowerTick,
-      upper: upperTick,
-    };
-  }
-
-  /**
-   * Convert tick range to price range
-   * @param tickRange - Tick range
-   * @returns Price range
-   */
-  tickRangeToPriceRange(
-    tickRange: TickRange,
-    decimalsA: number,
-    decimalsB: number,
-  ): PriceRange {
-    const lowerSqrtPrice = MathUtils.tickToSqrtPriceX64(tickRange.lower);
-    const upperSqrtPrice = MathUtils.tickToSqrtPriceX64(tickRange.upper);
-
-    return {
-      lower: MathUtils.sqrtPriceX64ToPrice(
-        lowerSqrtPrice,
-        decimalsA,
-        decimalsB,
-      ),
-      upper: MathUtils.sqrtPriceX64ToPrice(
-        upperSqrtPrice,
-        decimalsA,
-        decimalsB,
-      ),
-    };
-  }
-
-  /**
-   * Validate tick range
-   */
-  private validateTickRange(tickLower: number, tickUpper: number): void {
-    if (tickLower >= tickUpper) {
-      throw new ClmmError(
-        ClmmErrorCode.INVALID_TICK_RANGE,
-        "Lower tick must be less than upper tick",
-      );
-    }
-
-    if (tickLower < MIN_TICK || tickUpper > MAX_TICK) {
-      throw new ClmmError(
-        ClmmErrorCode.INVALID_TICK_RANGE,
-        `Ticks must be within range [${MIN_TICK}, ${MAX_TICK}]`,
-      );
-    }
-  }
-
-  /**
-   * Enrich position state with calculated fields
-   */
-  private enrichPositionInfo(positionState: any): PositionInfo {
-    const ageSeconds =
-      Math.floor(Date.now() / 1000) - Number(positionState.recentEpoch);
-
-    // Calculate unclaimed fees (simplified)
-    const unclaimedFees = {
-      token0: positionState.tokenFeesOwed0,
-      token1: positionState.tokenFeesOwed1,
-    };
-
-    // Extract unclaimed rewards
-    const unclaimedRewards = positionState.rewardInfos
-      .filter((reward: any) => reward.rewardOwedClaimed > 0n)
-      .map((reward: any) => ({
-        mint: reward.rewardMint,
-        amount: reward.rewardOwedClaimed,
-      }));
-
-    return {
-      ...positionState,
-      unclaimedFees,
-      unclaimedRewards,
-      ageSeconds,
-      inRange: false, // Would be calculated based on current pool tick
-      priceRange: {
-        lower: 0, // Would be calculated from ticks
-        upper: 0, // Would be calculated from ticks
-      },
-      valueUsd: undefined,
-    };
-  }
-
-  /**
-   * Get pool state (helper method)
-   */
-  private async getPoolState(poolAddress: Address): Promise<Account<PersonalPositionState>> {
-    try {
-      return await fetchPersonalPositionState(this.config.rpc, poolAddress, {
-        commitment: this.config.commitment,
-      });
-    } catch (error) {
-      throw new ClmmError(
-        ClmmErrorCode.POOL_NOT_FOUND,
-        `Pool not found: ${poolAddress}`,
-      );
-    }
-  }
+  // /**
+  //  * Enrich position state with calculated fields
+  //  */
+  // private enrichPositionInfo(positionState: any): PositionInfo {
+  //   const ageSeconds =
+  //     Math.floor(Date.now() / 1000) - Number(positionState.recentEpoch);
+  //
+  //   // Calculate unclaimed fees (simplified)
+  //   const unclaimedFees = {
+  //     token0: positionState.tokenFeesOwed0,
+  //     token1: positionState.tokenFeesOwed1,
+  //   };
+  //
+  //   // Extract unclaimed rewards
+  //   const unclaimedRewards = positionState.rewardInfos
+  //     .filter((reward: any) => reward.rewardOwedClaimed > 0n)
+  //     .map((reward: any) => ({
+  //       mint: reward.rewardMint,
+  //       amount: reward.rewardOwedClaimed,
+  //     }));
+  //
+  //   return {
+  //     ...positionState,
+  //     unclaimedFees,
+  //     unclaimedRewards,
+  //     ageSeconds,
+  //     inRange: false, // Would be calculated based on current pool tick
+  //     priceRange: {
+  //       lower: 0, // Would be calculated from ticks
+  //       upper: 0, // Would be calculated from ticks
+  //     },
+  //     valueUsd: undefined,
+  //   };
+  // }
 }

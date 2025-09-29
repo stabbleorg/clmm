@@ -4,6 +4,7 @@
 target
 KeyPairs
 *.json
+!sdk/package.json
 client/target
 **/*.rs.bk
 node_modules

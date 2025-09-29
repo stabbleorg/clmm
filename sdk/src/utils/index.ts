@@ -10,7 +10,7 @@ export * from "./pool";
 
 // Additional utility functions that don't warrant separate modules
 
-import { address, getAddressEncoder, type Address } from "@solana/kit";
+import { address, getAddressEncoder, SignatureBytes, TransactionSendingSigner, type Address } from "@solana/kit";
 import { ClmmError, ClmmErrorCode } from "../types";
 
 /**
@@ -173,4 +173,16 @@ export function isValidSolanaAddress(address: string): boolean {
 export function addresstoBytes(address: Address) {
   const encoder = getAddressEncoder();
   return encoder.encode(address);
+}
+
+export function getFakeSigner(address: Address) {
+  return {
+    address,
+    signAndSendTransactions: async (transactions, _config) => {
+      return transactions.map(() =>
+        new Uint8Array(64).fill(0) as SignatureBytes
+      );
+    }
+  } satisfies TransactionSendingSigner;
+
 }

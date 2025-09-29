@@ -9,6 +9,7 @@ import {
   type Address,
   type ProgramDerivedAddress,
   address,
+  getI32Encoder,
 } from "@solana/kit";
 import {
   STABBLE_CLMM_PROGRAM_ID,
@@ -190,19 +191,13 @@ export class PdaUtils {
     tickLowerIndex: number,
     tickUpperIndex: number,
   ): Promise<ProgramDerivedAddress> {
-    const lowerBytes = new ArrayBuffer(4);
-    new DataView(lowerBytes).setInt32(0, tickLowerIndex, true);
-
-    const upperBytes = new ArrayBuffer(4);
-    new DataView(upperBytes).setInt32(0, tickUpperIndex, true);
-
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
       seeds: [
         "protocol_position",
         poolState,
-        new Uint8Array(lowerBytes),
-        new Uint8Array(upperBytes),
+        getI32Encoder().encode(tickLowerIndex),
+        getI32Encoder().encode(tickUpperIndex),
       ],
     });
   }
