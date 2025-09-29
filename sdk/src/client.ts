@@ -4,12 +4,16 @@
  */
 
 import type { ClmmSdkConfig } from './types';
+import { Clmm } from './clmm';
 import { PoolManager } from './pool-manager';
 import { PositionManager } from './position-manager';
 import { SwapManager } from './swap';
 import { RewardsManager } from './rewards';
 
 export class ClmmSdk {
+  /** Core CLMM functionality (Raydium-style) */
+  public readonly clmm: Clmm;
+
   /** Pool management functionality */
   public readonly pools: PoolManager;
 
@@ -27,6 +31,7 @@ export class ClmmSdk {
 
   constructor(config: ClmmSdkConfig) {
     this.config = config;
+    this.clmm = new Clmm(config);
     this.pools = new PoolManager(config);
     this.positions = new PositionManager(config);
     this.swap = new SwapManager(config);

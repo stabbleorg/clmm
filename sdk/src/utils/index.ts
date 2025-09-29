@@ -3,13 +3,15 @@
  * Centralized export for all utility modules
  */
 
-export * from './math';
-export * from './pda';
+export * from "./math";
+export * from "./pda";
+export * from "./tick";
+export * from "./pool";
 
 // Additional utility functions that don't warrant separate modules
 
-import type { Address } from '@solana/kit';
-import { ClmmError, ClmmErrorCode } from '../types';
+import { address, getAddressEncoder, type Address } from "@solana/kit";
+import { ClmmError, ClmmErrorCode } from "../types";
 
 /**
  * Validate that an address is not empty
@@ -17,11 +19,14 @@ import { ClmmError, ClmmErrorCode } from '../types';
  * @param name - Name for error messages
  * @throws ClmmError if address is invalid
  */
-export function validateAddress(address: Address, name: string = 'address'): void {
+export function validateAddress(
+  address: Address,
+  name: string = "address",
+): void {
   if (!address || address.length === 0) {
     throw new ClmmError(
       ClmmErrorCode.POOL_NOT_FOUND,
-      `Invalid ${name}: address cannot be empty`
+      `Invalid ${name}: address cannot be empty`,
     );
   }
 }
@@ -32,11 +37,11 @@ export function validateAddress(address: Address, name: string = 'address'): voi
  * @param name - Name for error messages
  * @throws ClmmError if amount is invalid
  */
-export function validateAmount(amount: bigint, name: string = 'amount'): void {
+export function validateAmount(amount: bigint, name: string = "amount"): void {
   if (amount <= 0n) {
     throw new ClmmError(
       ClmmErrorCode.ZERO_MINT_AMOUNT,
-      `Invalid ${name}: must be greater than 0`
+      `Invalid ${name}: must be greater than 0`,
     );
   }
 }
@@ -46,7 +51,7 @@ export function validateAmount(amount: bigint, name: string = 'amount'): void {
  * @param ms - Milliseconds to sleep
  */
 export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -59,7 +64,7 @@ export function sleep(ms: number): Promise<void> {
 export function formatAmount(
   amount: bigint,
   decimals: number,
-  precision: number = 6
+  precision: number = 6,
 ): string {
   const divisor = BigInt(10 ** decimals);
   const quotient = amount / divisor;
@@ -69,10 +74,12 @@ export function formatAmount(
     return quotient.toString();
   }
 
-  const remainderStr = remainder.toString().padStart(decimals, '0');
-  const trimmedRemainder = remainderStr.replace(/0+$/, '').substring(0, precision);
+  const remainderStr = remainder.toString().padStart(decimals, "0");
+  const trimmedRemainder = remainderStr
+    .replace(/0+$/, "")
+    .substring(0, precision);
 
-  if (trimmedRemainder === '') {
+  if (trimmedRemainder === "") {
     return quotient.toString();
   }
 
@@ -89,7 +96,7 @@ export function formatAmount(
 export function approximatelyEqual(
   a: bigint,
   b: bigint,
-  tolerance: bigint = 1n
+  tolerance: bigint = 1n,
 ): boolean {
   const diff = a > b ? a - b : b - a;
   return diff <= tolerance;
@@ -105,7 +112,7 @@ export function approximatelyEqual(
 export async function retry<T>(
   fn: () => Promise<T>,
   maxRetries: number = 3,
-  initialDelay: number = 1000
+  initialDelay: number = 1000,
 ): Promise<T> {
   let lastError: Error | undefined;
 
@@ -126,7 +133,7 @@ export async function retry<T>(
 
   throw new ClmmError(
     ClmmErrorCode.TRANSACTION_FAILED,
-    `Operation failed after ${maxRetries + 1} attempts: ${lastError?.message || 'Unknown error'}`
+    `Operation failed after ${maxRetries + 1} attempts: ${lastError?.message || "Unknown error"}`,
   );
 }
 
@@ -156,10 +163,14 @@ export function percentageToBasisPoints(percentage: number): number {
 export function isValidSolanaAddress(address: string): boolean {
   try {
     // Basic validation - should be base58 encoded and correct length
-    const decoded = Buffer.from(address, 'base64');
+    const decoded = Buffer.from(address, "base64");
     return decoded.length === 32;
   } catch {
     return false;
   }
 }
 
+export function addresstoBytes(address: Address) {
+  const encoder = getAddressEncoder();
+  return encoder.encode(address);
+}

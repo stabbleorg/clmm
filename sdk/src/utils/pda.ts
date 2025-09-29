@@ -7,9 +7,14 @@ import {
   getProgramDerivedAddress,
   getU16Encoder,
   type Address,
-  type ProgramDerivedAddress
-} from '@solana/kit';
-import { STABBLE_CLMM_PROGRAM_ID, PDA_SEEDS, METADATA_PROGRAM_ID } from '../constants';
+  type ProgramDerivedAddress,
+  address,
+} from "@solana/kit";
+import {
+  STABBLE_CLMM_PROGRAM_ID,
+  PDA_SEEDS,
+  METADATA_PROGRAM_ID,
+} from "../constants";
 
 export class PdaUtils {
   /**
@@ -22,21 +27,17 @@ export class PdaUtils {
   static async getPoolStatePda(
     ammConfig: Address,
     tokenMintA: Address,
-    tokenMintB: Address
+    tokenMintB: Address,
   ): Promise<ProgramDerivedAddress> {
     // Ensure consistent ordering (token0 < token1)
-    const [token0, token1] = tokenMintA < tokenMintB
-      ? [tokenMintA, tokenMintB]
-      : [tokenMintB, tokenMintA];
+    const [token0, token1] =
+      tokenMintA < tokenMintB
+        ? [tokenMintA, tokenMintB]
+        : [tokenMintB, tokenMintA];
 
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [
-        PDA_SEEDS.POOL_STATE,
-        ammConfig,
-        token0,
-        token1,
-      ],
+      seeds: [PDA_SEEDS.POOL_STATE, ammConfig, token0, token1],
     });
   }
 
@@ -48,10 +49,7 @@ export class PdaUtils {
   static async getAmmConfigPda(index: number): Promise<ProgramDerivedAddress> {
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [
-        PDA_SEEDS.AMM_CONFIG,
-        getU16Encoder().encode(index),
-      ],
+      seeds: [PDA_SEEDS.AMM_CONFIG, getU16Encoder().encode(index)],
     });
   }
 
@@ -60,13 +58,12 @@ export class PdaUtils {
    * @param nftMint - Position NFT mint address
    * @returns Position state PDA
    */
-  static async getPositionStatePda(nftMint: Address): Promise<ProgramDerivedAddress> {
+  static async getPositionStatePda(
+    nftMint: Address,
+  ): Promise<ProgramDerivedAddress> {
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [
-        PDA_SEEDS.POSITION_STATE,
-        nftMint,
-      ],
+      seeds: [PDA_SEEDS.POSITION_STATE, nftMint],
     });
   }
 
@@ -78,7 +75,7 @@ export class PdaUtils {
    */
   static async getTickArrayStatePda(
     poolState: Address,
-    startTickIndex: number
+    startTickIndex: number,
   ): Promise<ProgramDerivedAddress> {
     // Convert tick index to bytes (signed 32-bit integer)
     const tickBytes = new ArrayBuffer(4);
@@ -86,11 +83,7 @@ export class PdaUtils {
 
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [
-        PDA_SEEDS.TICK_ARRAY_STATE,
-        poolState,
-        new Uint8Array(tickBytes),
-      ],
+      seeds: [PDA_SEEDS.TICK_ARRAY_STATE, poolState, new Uint8Array(tickBytes)],
     });
   }
 
@@ -99,13 +92,23 @@ export class PdaUtils {
    * @param poolState - Pool state address
    * @returns Observation state PDA
    */
-  static async getObservationStatePda(poolState: Address): Promise<ProgramDerivedAddress> {
+  static async getObservationStatePda(
+    poolState: Address,
+  ): Promise<ProgramDerivedAddress> {
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [
-        PDA_SEEDS.OBSERVATION_STATE,
-        poolState,
-      ],
+      seeds: [PDA_SEEDS.OBSERVATION_STATE, poolState],
+    });
+  }
+
+  static async getPoolVaultIdPda(
+    programAddress: Address,
+    poolAddress: Address,
+    vaultAddress: Address,
+  ): Promise<ProgramDerivedAddress> {
+    return await getProgramDerivedAddress({
+      seeds: ["pool_vault", poolAddress, vaultAddress],
+      programAddress,
     });
   }
 
@@ -114,13 +117,12 @@ export class PdaUtils {
    * @param poolState - Pool state address
    * @returns Tick array bitmap extension PDA
    */
-  static async getTickArrayBitmapExtensionPda(poolState: Address): Promise<ProgramDerivedAddress> {
+  static async getTickArrayBitmapExtensionPda(
+    poolState: Address,
+  ): Promise<ProgramDerivedAddress> {
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [
-        PDA_SEEDS.BITMAP_EXTENSION,
-        poolState,
-      ],
+      seeds: [PDA_SEEDS.BITMAP_EXTENSION, poolState],
     });
   }
 
@@ -154,18 +156,25 @@ export class PdaUtils {
     tickLower: number,
     tickUpper: number,
     tickSpacing: number,
-    tickCurrent: number
+    tickCurrent: number,
   ): Promise<ProgramDerivedAddress[]> {
     const startIndexLower = this.getTickArrayStartIndex(tickLower, tickSpacing);
     const startIndexUpper = this.getTickArrayStartIndex(tickUpper, tickSpacing);
-    const startIndexCurrent = this.getTickArrayStartIndex(tickCurrent, tickSpacing);
+    const startIndexCurrent = this.getTickArrayStartIndex(
+      tickCurrent,
+      tickSpacing,
+    );
 
-    const indices = new Set([startIndexLower, startIndexUpper, startIndexCurrent]);
+    const indices = new Set([
+      startIndexLower,
+      startIndexUpper,
+      startIndexCurrent,
+    ]);
 
     return await Promise.all(
-      Array.from(indices).map(index =>
-        this.getTickArrayStatePda(poolState, index)
-      )
+      Array.from(indices).map((index) =>
+        this.getTickArrayStatePda(poolState, index),
+      ),
     );
   }
 
@@ -179,7 +188,7 @@ export class PdaUtils {
   static async getProtocolPositionStatePda(
     poolState: Address,
     tickLowerIndex: number,
-    tickUpperIndex: number
+    tickUpperIndex: number,
   ): Promise<ProgramDerivedAddress> {
     const lowerBytes = new ArrayBuffer(4);
     new DataView(lowerBytes).setInt32(0, tickLowerIndex, true);
@@ -190,7 +199,7 @@ export class PdaUtils {
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
       seeds: [
-        'protocol_position',
+        "protocol_position",
         poolState,
         new Uint8Array(lowerBytes),
         new Uint8Array(upperBytes),
@@ -203,24 +212,21 @@ export class PdaUtils {
    * @param poolState - Pool state address
    * @returns Operation state PDA
    */
-  static async getOperationStatePda(poolState: Address): Promise<ProgramDerivedAddress> {
+  static async getOperationStatePda(
+    poolState: Address,
+  ): Promise<ProgramDerivedAddress> {
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [
-        'operation',
-        poolState,
-      ],
+      seeds: ["operation", poolState],
     });
   }
 }
 
-export async function getMetadataPDA(mint: Address): Promise<ProgramDerivedAddress> {
+export async function getMetadataPda(
+  mint: Address,
+): Promise<ProgramDerivedAddress> {
   return await getProgramDerivedAddress({
-    programAddress: Address METADATA_PROGRAM_ID,
-    seeds: [
-      "metadata",
-      METADATA_PROGRAM_ID.toString(),
-      mint
-    ]
-  })
+    seeds: ["metadata", METADATA_PROGRAM_ID.toString(), mint],
+    programAddress: address(METADATA_PROGRAM_ID),
+  });
 }

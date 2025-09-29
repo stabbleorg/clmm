@@ -1,18 +1,18 @@
 /**
  * Pool Management Module
- * Handles pool creation, configuration, and queries
+ * Handles pool queries and management operations
  */
 
-import type {
-  Address,
-  Rpc,
-  TransactionSigner,
-  Instruction,
-} from '@solana/kit';
 import {
-  getCreateAmmConfigInstruction,
+  type Address,
+  type Rpc,
+  type TransactionSigner,
+  type Instruction,
+  address,
+} from "@solana/kit";
+import {
   getCreatePoolInstruction,
-  getUpdateAmmConfigInstruction,
+  getCreateAmmConfigInstruction,
   getUpdatePoolStatusInstruction,
   fetchPoolState,
   fetchMaybePoolState,
@@ -21,116 +21,189 @@ import {
   type CreatePoolInput,
   type CreateAmmConfigInput,
   type UpdatePoolStatusInput,
-} from './generated';
+} from "./generated";
+
 import type {
   ClmmSdkConfig,
+  MakeInstructionResult,
   PoolInfo,
   TokenInfo,
-  CreatePoolParams,
-  ClmmError,
-} from './types';
-import { ClmmErrorCode } from './types';
-import { PdaUtils } from './utils/pda';
-import { MathUtils } from './utils/math';
-import { FEE_TIERS, TICK_SPACINGS } from './constants';
+} from "./types";
+
+import { ClmmError, ClmmErrorCode } from "./types";
+import { PdaUtils } from "./utils/pda";
+import { MathUtils } from "./utils/math";
+import {
+  FEE_TIERS,
+  SYSTEM_PROGRAM_ID,
+  SYSVAR_RENT_PROGRAM_ID,
+  TICK_SPACINGS,
+  ONE,
+} from "./constants";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import BN from "bn.js";
+import Decimal from "decimal.js";
 
 export class PoolManager {
-  constructor(private readonly config: ClmmSdkConfig) { }
+  constructor(private readonly config: ClmmSdkConfig) {}
 
   /**
-   * Create a new liquidity pool
+   * Make create pool instructions
    * @param params - Pool creation parameters
-   * @returns Pool creation instruction
+   * @returns Instruction result following Raydium pattern
    */
-  async createPool(params: CreatePoolParams): Promise<Instruction> {
+  static async makeCreatePoolInstructions(params: {
+    programId: Address;
+    owner: TransactionSigner;
+    tokenMintA: Address;
+    tokenMintB: Address;
+    ammConfigId: Address;
+    initialPrice: Decimal;
+    mintADecimals: number;
+    mintBDecimals: number;
+  }): Promise<
+    MakeInstructionResult<{
+      poolId: Address;
+      observationId: Address;
+      tokenVault0: Address;
+      tokenVault1: Address;
+    }>
+  > {
     const {
-      tokenA,
-      tokenB,
-      fee,
+      programId,
+      owner,
+      tokenMintA,
+      tokenMintB,
+      ammConfigId,
       initialPrice,
-      ammConfig,
-      creator,
+      mintADecimals,
+      mintBDecimals,
     } = params;
 
-    // Ensure token ordering (token0 < token1)
-    const [token0, token1] = tokenA < tokenB
-      ? [tokenA, tokenB]
-      : [tokenB, tokenA];
+    // Ensure correct token order
+    const addressA = address(tokenMintA);
+    const addressB = address(tokenMintB);
+    const isAFirst = Buffer.from(addressA).compare(Buffer.from(addressB)) < 0;
 
-    // Get or create AMM config
-    const configAddress = ammConfig ?? (await PdaUtils.getAmmConfigPda(0))[0];
+    const [token0, token1, decimals0, decimals1, priceAdjusted] = isAFirst
+      ? [tokenMintA, tokenMintB, mintADecimals, mintBDecimals, initialPrice]
+      : [
+          tokenMintB,
+          tokenMintA,
+          mintBDecimals,
+          mintADecimals,
+          new Decimal(1).div(initialPrice),
+        ];
 
-    // Derive pool state PDA
-    const poolStatePda = await PdaUtils.getPoolStatePda(configAddress, token0, token1);
+    const initialPriceX64 = MathUtils.priceToSqrtPriceX64(
+      priceAdjusted,
+      decimals0,
+      decimals1,
+    );
 
-    // Derive dependent PDAs in parallel
-    const [observationStatePda, tickArrayBitmapPda] = await Promise.all([
-      PdaUtils.getObservationStatePda(poolStatePda[0]),
-      PdaUtils.getTickArrayBitmapExtensionPda(poolStatePda[0])
-    ]);
+    const [poolPda] = await PdaUtils.getPoolStatePda(
+      ammConfigId,
+      token0,
+      token1,
+    );
+    const [observationPda] = await PdaUtils.getObservationStatePda(poolPda);
+    const [tickArrayBitmapPda] = await PdaUtils.getTickArrayBitmapExtensionPda(poolPda);
 
-    // Validate initial price
-    if (initialPrice <= 0n) {
-      throw new ClmmError(
-        ClmmErrorCode.INVALID_TICK_RANGE,
-        'Initial price must be positive'
-      );
-    }
+    const [mintAVault] = await PdaUtils.getPoolVaultIdPda(
+      programId,
+      poolPda,
+      tokenMintA,
+    );
+    const [mintBVault] = await PdaUtils.getPoolVaultIdPda(
+      programId,
+      poolPda,
+      tokenMintB,
+    );
 
-    // Get tick spacing for fee tier
-    const tickSpacing = TICK_SPACINGS[fee];
-    if (!tickSpacing) {
-      throw new ClmmError(
-        ClmmErrorCode.INVALID_TICK_RANGE,
-        `Unsupported fee tier: ${fee}`
-      );
-    }
-
-    const input: CreatePoolInput = {
-      poolCreator: creator,
-      ammConfig: configAddress,
-      poolState: poolStatePda[0],
+    // Create instruction
+    const instruction = getCreatePoolInstruction({
+      poolCreator: owner,
+      ammConfig: ammConfigId,
+      poolState: poolPda,
       tokenMint0: token0,
       tokenMint1: token1,
-      tokenVault0: '', // Will be derived in instruction
-      tokenVault1: '', // Will be derived in instruction
-      observationState: observationStatePda[0],
-      tickArrayBitmap: tickArrayBitmapPda[0],
-      tokenProgram0: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' as Address, // SPL Token Program
-      tokenProgram1: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' as Address, // SPL Token Program
-      sqrtPriceX64: initialPrice,
+      tokenVault0: mintAVault,
+      tokenVault1: mintBVault,
+      observationState: observationPda,
+      tickArrayBitmap: tickArrayBitmapPda,
+      tokenProgram0: TOKEN_PROGRAM_ADDRESS,
+      tokenProgram1: TOKEN_PROGRAM_ADDRESS,
+      systemProgram: SYSTEM_PROGRAM_ID,
+      rent: SYSVAR_RENT_PROGRAM_ID,
+      sqrtPriceX64: initialPriceX64,
       openTime: BigInt(Math.floor(Date.now() / 1000)),
-    };
+    });
 
-    return getCreatePoolInstruction(input);
+    return {
+      instructions: [instruction],
+      signers: [owner],
+      instructionTypes: ["CreatePool"],
+      address: {
+        poolId: poolPda,
+        observationId: observationPda,
+        tokenVault0: mintAVault,
+        tokenVault1: mintBVault,
+      },
+      lookupTableAddress: [],
+    };
   }
 
   /**
-   * Create AMM configuration
-   * @param params - AMM config parameters
-   * @returns AMM config creation instruction
+   * Make create AMM config instructions
+   * @param params - Config creation parameters
+   * @returns Instruction result following Raydium pattern
    */
-  async createAmmConfig(params: {
+  static async makeCreateAmmConfigInstructions(params: {
+    programId: Address;
     owner: TransactionSigner;
     index: number;
     tickSpacing: number;
     tradeFeeRate: number;
     protocolFeeRate: number;
     fundFeeRate: number;
-  }): Promise<Instruction> {
-    const configPda = await PdaUtils.getAmmConfigPda(params.index);
+  }): Promise<
+    MakeInstructionResult<{
+      ammConfigId: Address;
+    }>
+  > {
+    const {
+      programId,
+      owner,
+      index,
+      tickSpacing,
+      tradeFeeRate,
+      protocolFeeRate,
+      fundFeeRate,
+    } = params;
 
-    const input: CreateAmmConfigInput = {
-      owner: params.owner,
-      ammConfig: configPda[0],
-      index: params.index,
-      tickSpacing: params.tickSpacing,
-      tradeFeeRate: params.tradeFeeRate,
-      protocolFeeRate: params.protocolFeeRate,
-      fundFeeRate: params.fundFeeRate,
+    // Derive AMM config PDA
+    const ammConfigPda = await PdaUtils.getAmmConfigPda(index);
+
+    const instruction = getCreateAmmConfigInstruction({
+      owner,
+      ammConfig: ammConfigPda[0],
+      systemProgram: "11111111111111111111111111111111",
+      index,
+      tickSpacing,
+      tradeFeeRate,
+      protocolFeeRate,
+      fundFeeRate,
+    });
+
+    return {
+      instructions: [instruction],
+      signers: [owner],
+      instructionTypes: ["CreateAmmConfig"],
+      address: {
+        ammConfigId: ammConfigPda[0],
+      },
+      lookupTableAddress: [],
     };
-
-    return getCreateAmmConfigInstruction(input);
   }
 
   /**
@@ -143,7 +216,7 @@ export class PoolManager {
       const poolState = await fetchMaybePoolState(
         this.config.rpc,
         poolAddress,
-        { commitment: this.config.commitment }
+        { commitment: this.config.commitment },
       );
 
       if (!poolState.exists) {
@@ -154,7 +227,7 @@ export class PoolManager {
     } catch (error) {
       throw new ClmmError(
         ClmmErrorCode.POOL_NOT_FOUND,
-        `Failed to fetch pool: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to fetch pool: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     }
   }
@@ -171,10 +244,14 @@ export class PoolManager {
     tokenA: Address,
     tokenB: Address,
     fee: number,
-    ammConfigIndex: number = 0
+    ammConfigIndex: number = 0,
   ): Promise<PoolInfo | null> {
     const ammConfigPda = await PdaUtils.getAmmConfigPda(ammConfigIndex);
-    const poolPda = await PdaUtils.getPoolStatePda(ammConfigPda[0], tokenA, tokenB);
+    const poolPda = await PdaUtils.getPoolStatePda(
+      ammConfigPda[0],
+      tokenA,
+      tokenB,
+    );
 
     return this.getPool(poolPda[0]);
   }
@@ -187,7 +264,7 @@ export class PoolManager {
    */
   async getPoolsForTokenPair(
     tokenA: Address,
-    tokenB: Address
+    tokenB: Address,
   ): Promise<PoolInfo[]> {
     const pools: PoolInfo[] = [];
 
@@ -212,7 +289,10 @@ export class PoolManager {
    * @param limit - Number of pools to fetch
    * @returns Array of pool information
    */
-  async getAllPools(offset: number = 0, limit: number = 100): Promise<PoolInfo[]> {
+  async getAllPools(
+    offset: number = 0,
+    limit: number = 100,
+  ): Promise<PoolInfo[]> {
     // This is a simplified implementation
     // In practice, you'd need to implement proper pagination
     // by maintaining an index of all pool addresses
@@ -224,7 +304,7 @@ export class PoolManager {
     } catch (error) {
       throw new ClmmError(
         ClmmErrorCode.TRANSACTION_FAILED,
-        `Failed to fetch pools: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to fetch pools: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     }
   }
@@ -239,7 +319,7 @@ export class PoolManager {
   async updatePoolStatus(
     poolAddress: Address,
     status: number,
-    authority: TransactionSigner
+    authority: TransactionSigner,
   ): Promise<Instruction> {
     const input: UpdatePoolStatusInput = {
       authority,
@@ -258,10 +338,10 @@ export class PoolManager {
    * @returns Human-readable price
    */
   calculatePoolPrice(
-    sqrtPriceX64: bigint,
+    sqrtPriceX64: BN,
     decimalsA: number,
-    decimalsB: number
-  ): number {
+    decimalsB: number,
+  ): Decimal {
     return MathUtils.sqrtPriceX64ToPrice(sqrtPriceX64, decimalsA, decimalsB);
   }
 
@@ -272,20 +352,20 @@ export class PoolManager {
     // This would be enhanced with real token metadata and pricing data
     const tokenA: TokenInfo = {
       mint: poolState.tokenMint0,
-      symbol: 'TOKEN_A', // Would fetch from metadata
+      symbol: "TOKEN_A", // Would fetch from metadata
       decimals: poolState.mintDecimals0,
     };
 
     const tokenB: TokenInfo = {
       mint: poolState.tokenMint1,
-      symbol: 'TOKEN_B', // Would fetch from metadata
+      symbol: "TOKEN_B", // Would fetch from metadata
       decimals: poolState.mintDecimals1,
     };
 
     const currentPrice = this.calculatePoolPrice(
       poolState.sqrtPriceX64,
       tokenA.decimals,
-      tokenB.decimals
+      tokenB.decimals,
     );
 
     return {
@@ -319,7 +399,7 @@ export class PoolManager {
     if (!spacing) {
       throw new ClmmError(
         ClmmErrorCode.INVALID_TICK_RANGE,
-        `Invalid fee tier: ${fee}`
+        `Invalid fee tier: ${fee}`,
       );
     }
     return spacing;
