@@ -39,7 +39,6 @@ export class PositionManager {
    * @returns Instruction result following Raydium pattern
    */
   async makeOpenPositionFromLiquidityInstructions(params: {
-    programId: Address;
     poolAccount: Account<PoolState, Address>;
     ownerInfo: {
       feePayer: TransactionSigner;
@@ -165,7 +164,6 @@ export class PositionManager {
    * @returns Instruction result following Raydium pattern
    */
   async makeOpenPositionFromBaseInstructions(params: {
-    programId: Address;
     poolAccount: Account<PoolState, Address>;
     ownerInfo: {
       feePayer: TransactionSigner;
@@ -294,7 +292,6 @@ export class PositionManager {
    * @returns Instruction result following Raydium pattern
    */
   async makeIncreaseLiquidityV2Instructions(params: {
-    programId: Address;
     ownerPosition: Account<PersonalPositionState>;
     poolState: Account<PoolState, Address>;
     ownerInfo: {
@@ -393,7 +390,6 @@ export class PositionManager {
    * @returns Instruction result following Raydium pattern
    */
   async makeDecreaseLiquidityV2Instructions(params: {
-    programId: Address;
     ownerPosition: Account<PersonalPositionState>;
     poolState: Account<PoolState, Address>;
     ownerInfo: {
@@ -491,7 +487,6 @@ export class PositionManager {
    * @returns Instruction result following established pattern
    */
   async makeClosePositionInstructions(params: {
-    programId: Address;
     ownerPosition: Account<PersonalPositionState>;
     ownerInfo: {
       wallet: Address;
