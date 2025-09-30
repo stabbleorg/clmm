@@ -1,8 +1,4 @@
-import {
-  type Address,
-  type TransactionSigner,
-  address,
-} from "@solana/kit";
+import { type Address, type TransactionSigner, address } from "@solana/kit";
 import {
   getCreateAmmConfigInstruction,
   fetchMaybePoolState,
@@ -20,25 +16,20 @@ import { ClmmError, ClmmErrorCode } from "./types";
 import { PdaUtils } from "./utils/pda";
 import { SqrtPriceMath } from "./utils/math";
 
-import {
-  FEE_TIERS,
-  SYSTEM_PROGRAM_ID,
-  TICK_SPACINGS,
-} from "./constants";
+import { FEE_TIERS, SYSTEM_PROGRAM_ID, TICK_SPACINGS } from "./constants";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import BN from "bn.js";
 import Decimal from "decimal.js";
 
 export class PoolManager {
-  constructor(private readonly config: ClmmSdkConfig) { }
+  constructor(private readonly config: ClmmSdkConfig) {}
 
   /**
    * Make create pool instructions
    * @param params - Pool creation parameters
    * @returns Instruction result following Raydium pattern
    */
-  static async makeCreatePoolInstructions(params: {
-    programId: Address;
+  async makeCreatePoolInstructions(params: {
     owner: TransactionSigner;
     tokenMintA: Address;
     tokenMintB: Address;
@@ -55,7 +46,6 @@ export class PoolManager {
     }>
   > {
     const {
-      programId,
       owner,
       tokenMintA,
       tokenMintB,
@@ -71,7 +61,13 @@ export class PoolManager {
     const isBFirst = Buffer.from(addressB).compare(Buffer.from(addressA)) > 0;
 
     const [token0, token1, decimals0, decimals1, priceAdjusted] = isBFirst
-      ? [tokenMintB, tokenMintA, mintBDecimals, mintADecimals, new Decimal(1).div(initialPrice)]
+      ? [
+          tokenMintB,
+          tokenMintA,
+          mintBDecimals,
+          mintADecimals,
+          new Decimal(1).div(initialPrice),
+        ]
       : [tokenMintA, tokenMintB, mintADecimals, mintBDecimals, initialPrice];
 
     const initialPriceX64 = SqrtPriceMath.priceToSqrtPriceX64(
@@ -86,18 +82,11 @@ export class PoolManager {
       token1,
     );
     const [observationPda] = await PdaUtils.getObservationStatePda(poolPda);
-    const [tickArrayBitmapPda] = await PdaUtils.getTickArrayBitmapExtensionPda(poolPda);
+    const [tickArrayBitmapPda] =
+      await PdaUtils.getTickArrayBitmapExtensionPda(poolPda);
 
-    const [tokenVault0] = await PdaUtils.getPoolVaultIdPda(
-      programId,
-      poolPda,
-      token0,
-    );
-    const [tokenVault1] = await PdaUtils.getPoolVaultIdPda(
-      programId,
-      poolPda,
-      token1,
-    );
+    const [tokenVault0] = await PdaUtils.getPoolVaultIdPda(poolPda, token0);
+    const [tokenVault1] = await PdaUtils.getPoolVaultIdPda(poolPda, token1);
 
     // Create instruction
     const instruction = await getCreatePoolInstructionAsync({
@@ -135,7 +124,7 @@ export class PoolManager {
    * @param params - Config creation parameters
    * @returns Instruction result following Raydium pattern
    */
-  static async makeCreateAmmConfigInstructions(params: {
+  async makeCreateAmmConfigInstructions(params: {
     programId: Address;
     owner: TransactionSigner;
     index: number;
@@ -257,7 +246,11 @@ export class PoolManager {
     decimalsA: number,
     decimalsB: number,
   ): Decimal {
-    return SqrtPriceMath.sqrtPriceX64ToPrice(sqrtPriceX64, decimalsA, decimalsB);
+    return SqrtPriceMath.sqrtPriceX64ToPrice(
+      sqrtPriceX64,
+      decimalsA,
+      decimalsB,
+    );
   }
 
   /**

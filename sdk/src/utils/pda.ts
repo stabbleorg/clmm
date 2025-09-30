@@ -5,6 +5,7 @@
 
 import {
   getProgramDerivedAddress,
+  getAddressEncoder,
   getU16Encoder,
   type Address,
   type ProgramDerivedAddress,
@@ -16,6 +17,9 @@ import {
   PDA_SEEDS,
   METADATA_PROGRAM_ID,
 } from "../constants";
+
+const addressEncoder = getAddressEncoder();
+const i32Encoder = getI32Encoder();
 
 export class PdaUtils {
   /**
@@ -38,7 +42,12 @@ export class PdaUtils {
 
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [PDA_SEEDS.POOL_STATE, ammConfig, token0, token1],
+      seeds: [
+        PDA_SEEDS.POOL_STATE,
+        addressEncoder.encode(ammConfig),
+        addressEncoder.encode(token0),
+        addressEncoder.encode(token1),
+      ],
     });
   }
 
@@ -64,7 +73,7 @@ export class PdaUtils {
   ): Promise<ProgramDerivedAddress> {
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [PDA_SEEDS.POSITION_STATE, nftMint],
+      seeds: [PDA_SEEDS.POSITION_STATE, addressEncoder.encode(nftMint)],
     });
   }
 
@@ -78,13 +87,13 @@ export class PdaUtils {
     poolState: Address,
     startTickIndex: number,
   ): Promise<ProgramDerivedAddress> {
-    // Convert tick index to bytes (signed 32-bit integer)
-    const tickBytes = new ArrayBuffer(4);
-    new DataView(tickBytes).setInt32(0, startTickIndex, true); // little endian
-
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [PDA_SEEDS.TICK_ARRAY_STATE, poolState, new Uint8Array(tickBytes)],
+      seeds: [
+        PDA_SEEDS.TICK_ARRAY_STATE,
+        addressEncoder.encode(poolState),
+        i32Encoder.encode(startTickIndex),
+      ],
     });
   }
 
@@ -98,18 +107,21 @@ export class PdaUtils {
   ): Promise<ProgramDerivedAddress> {
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [PDA_SEEDS.OBSERVATION_STATE, poolState],
+      seeds: [PDA_SEEDS.OBSERVATION_STATE, addressEncoder.encode(poolState)],
     });
   }
 
   static async getPoolVaultIdPda(
-    programAddress: Address,
     poolAddress: Address,
     vaultAddress: Address,
   ): Promise<ProgramDerivedAddress> {
     return await getProgramDerivedAddress({
-      seeds: ["pool_vault", poolAddress, vaultAddress],
-      programAddress,
+      seeds: [
+        PDA_SEEDS.POOL_VAULT,
+        addressEncoder.encode(poolAddress),
+        addressEncoder.encode(vaultAddress),
+      ],
+      programAddress: STABBLE_CLMM_PROGRAM_ID,
     });
   }
 
@@ -123,7 +135,7 @@ export class PdaUtils {
   ): Promise<ProgramDerivedAddress> {
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: [PDA_SEEDS.BITMAP_EXTENSION, poolState],
+      seeds: [PDA_SEEDS.BITMAP_EXTENSION, addressEncoder.encode(poolState)],
     });
   }
 
@@ -194,10 +206,10 @@ export class PdaUtils {
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
       seeds: [
-        "protocol_position",
-        poolState,
-        getI32Encoder().encode(tickLowerIndex),
-        getI32Encoder().encode(tickUpperIndex),
+        PDA_SEEDS.POSITION_STATE,
+        addressEncoder.encode(poolState),
+        i32Encoder.encode(tickLowerIndex),
+        i32Encoder.encode(tickUpperIndex),
       ],
     });
   }
@@ -212,7 +224,7 @@ export class PdaUtils {
   ): Promise<ProgramDerivedAddress> {
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
-      seeds: ["operation", poolState],
+      seeds: [PDA_SEEDS.OPERATION, addressEncoder.encode(poolState)],
     });
   }
 }
@@ -221,7 +233,11 @@ export async function getMetadataPda(
   mint: Address,
 ): Promise<ProgramDerivedAddress> {
   return await getProgramDerivedAddress({
-    seeds: ["metadata", METADATA_PROGRAM_ID.toString(), mint],
+    seeds: [
+      "metadata",
+      addressEncoder.encode(address(METADATA_PROGRAM_ID)),
+      addressEncoder.encode(mint),
+    ],
     programAddress: address(METADATA_PROGRAM_ID),
   });
 }

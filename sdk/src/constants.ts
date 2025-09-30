@@ -34,7 +34,9 @@ export const MaxU64 = Q64.sub(ONE);
 export const MIN_TICK = -443636;
 export const MAX_TICK = 443636;
 export const MIN_SQRT_RATIO = new BN("4295128739");
-export const MAX_SQRT_RATIO = new BN("1461446703485210103287273052203988822378723970342");
+export const MAX_SQRT_RATIO = new BN(
+  "1461446703485210103287273052203988822378723970342",
+);
 
 // Configuration and Constants
 export const DEFAULT_SLIPPAGE_TOLERANCE = 0.01; // 1%
@@ -166,11 +168,11 @@ export const DISCRIMINATORS = {
 export const PDA_SEEDS = {
   AMM_CONFIG: "amm_config",
   POOL_STATE: "pool",
-  POOL_VAULT_SEED: "pool_vault",
+  POOL_VAULT: "pool_vault",
   POOL_REWARD_VAULT_SEED: "pool_reward_vault",
   POSITION_STATE: "position",
   TICK_ARRAY_STATE: "tick_array",
   OBSERVATION_STATE: "observation",
-  OPERATION_SEED: "operation",
+  OPERATION: "operation",
   BITMAP_EXTENSION: "pool_tick_array_bitmap_extension",
 } as const;

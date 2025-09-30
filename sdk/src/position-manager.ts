@@ -23,20 +23,23 @@ import type {
 
 import { ClmmError, ClmmErrorCode } from "./types";
 import { PdaUtils, getMetadataPda } from "./utils/pda";
-import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda } from "@solana-program/token";
+import {
+  TOKEN_PROGRAM_ADDRESS,
+  findAssociatedTokenPda,
+} from "@solana-program/token";
 import { getFakeSigner, TickUtils } from "./utils";
 
 export class PositionManager {
-  constructor(private readonly config: ClmmSdkConfig) { }
+  constructor(private readonly config: ClmmSdkConfig) {}
 
   /**
    * Make open position V2 instructions
    * @param params - Position opening parameters
    * @returns Instruction result following Raydium pattern
    */
-  static async makeOpenPositionV2Instructions(params: {
+  async makeOpenPositionV2Instructions(params: {
     programId: Address;
-    poolAccount: Account<PoolState, Address>
+    poolAccount: Account<PoolState, Address>;
     ownerInfo: {
       feePayer: TransactionSigner;
       wallet: Address;
@@ -79,7 +82,7 @@ export class PositionManager {
       nftMintAccount = getEphemeralSigners()[0];
     } else {
       let k = await generateKeyPairSigner();
-      signers.push(k)
+      signers.push(k);
       nftMintAccount = k;
     }
 
@@ -107,7 +110,6 @@ export class PositionManager {
       owner: ownerInfo.wallet,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
     });
-
 
     // Get protocol position
     const [protocolPositionPda] = await PdaUtils.getProtocolPositionStatePda(
@@ -160,9 +162,9 @@ export class PositionManager {
    * @param params - Increase liquidity parameters
    * @returns Instruction result following Raydium pattern
    */
-  static async makeIncreaseLiquidityV2Instructions(params: {
+  async makeIncreaseLiquidityV2Instructions(params: {
     programId: Address;
-    ownerPosition: Account<PersonalPositionState>,
+    ownerPosition: Account<PersonalPositionState>;
     poolState: Account<PoolState, Address>;
     ownerInfo: {
       wallet: Address;
@@ -183,9 +185,11 @@ export class PositionManager {
     } = params;
 
     // Create a fake owner signer - used only to build the ix
-    const fakeNftOwnerSigner = getFakeSigner(ownerInfo.wallet)
+    const fakeNftOwnerSigner = getFakeSigner(ownerInfo.wallet);
 
-    const [personalPosition] = await PdaUtils.getPositionStatePda(ownerPosition.data.nftMint);
+    const [personalPosition] = await PdaUtils.getPositionStatePda(
+      ownerPosition.data.nftMint,
+    );
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.data.nftMint,
       owner: ownerInfo.wallet,
@@ -202,12 +206,18 @@ export class PositionManager {
     // Get tick arrays for lower and upper ticks
     const [tickArrayLower] = await PdaUtils.getTickArrayStatePda(
       poolState.address,
-      PdaUtils.getTickArrayStartIndex(ownerPosition.data.tickLowerIndex, poolState.data.tickSpacing),
+      PdaUtils.getTickArrayStartIndex(
+        ownerPosition.data.tickLowerIndex,
+        poolState.data.tickSpacing,
+      ),
     );
 
     const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
       poolState.address,
-      PdaUtils.getTickArrayStartIndex(ownerPosition.data.tickUpperIndex, poolState.data.tickSpacing),
+      PdaUtils.getTickArrayStartIndex(
+        ownerPosition.data.tickUpperIndex,
+        poolState.data.tickSpacing,
+      ),
     );
 
     const instruction = getIncreaseLiquidityV2Instruction({
@@ -235,7 +245,13 @@ export class PositionManager {
       instructions: [instruction],
       signers: [],
       instructionTypes: ["IncreaseLiquidityV2"],
-      address: { tickArrayLower, tickArrayUpper, positionNftAccount, personalPosition, protocolPositionPda },
+      address: {
+        tickArrayLower,
+        tickArrayUpper,
+        positionNftAccount,
+        personalPosition,
+        protocolPositionPda,
+      },
       lookupTableAddress: [], // TODO:
     };
   }
@@ -245,9 +261,9 @@ export class PositionManager {
    * @param params - Decrease liquidity parameters
    * @returns Instruction result following Raydium pattern
    */
-  static async makeDecreaseLiquidityV2Instructions(params: {
+  async makeDecreaseLiquidityV2Instructions(params: {
     programId: Address;
-    ownerPosition: Account<PersonalPositionState>,
+    ownerPosition: Account<PersonalPositionState>;
     poolState: Account<PoolState, Address>;
     ownerInfo: {
       wallet: Address;
@@ -268,9 +284,11 @@ export class PositionManager {
     } = params;
 
     // Create a fake owner signer - used only to build the ix
-    const fakeNftOwnerSigner = getFakeSigner(ownerInfo.wallet)
+    const fakeNftOwnerSigner = getFakeSigner(ownerInfo.wallet);
 
-    const [personalPosition] = await PdaUtils.getPositionStatePda(ownerPosition.data.nftMint);
+    const [personalPosition] = await PdaUtils.getPositionStatePda(
+      ownerPosition.data.nftMint,
+    );
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.data.nftMint,
       owner: ownerInfo.wallet,
@@ -287,12 +305,18 @@ export class PositionManager {
     // Get tick arrays for lower and upper ticks
     const [tickArrayLower] = await PdaUtils.getTickArrayStatePda(
       poolState.address,
-      PdaUtils.getTickArrayStartIndex(ownerPosition.data.tickLowerIndex, poolState.data.tickSpacing),
+      PdaUtils.getTickArrayStartIndex(
+        ownerPosition.data.tickLowerIndex,
+        poolState.data.tickSpacing,
+      ),
     );
 
     const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
       poolState.address,
-      PdaUtils.getTickArrayStartIndex(ownerPosition.data.tickUpperIndex, poolState.data.tickSpacing),
+      PdaUtils.getTickArrayStartIndex(
+        ownerPosition.data.tickUpperIndex,
+        poolState.data.tickSpacing,
+      ),
     );
 
     const instruction = getDecreaseLiquidityV2Instruction({
@@ -319,7 +343,13 @@ export class PositionManager {
       instructions: [instruction],
       signers: [],
       instructionTypes: ["DecreaseLiquidityV2"],
-      address: { tickArrayLower, tickArrayUpper, positionNftAccount, personalPosition, protocolPositionPda },
+      address: {
+        tickArrayLower,
+        tickArrayUpper,
+        positionNftAccount,
+        personalPosition,
+        protocolPositionPda,
+      },
       lookupTableAddress: [],
     };
   }
@@ -329,22 +359,21 @@ export class PositionManager {
    * @param params - Close position parameters
    * @returns Instruction result following established pattern
    */
-  static async makeClosePositionInstructions(params: {
+  async makeClosePositionInstructions(params: {
     programId: Address;
     ownerPosition: Account<PersonalPositionState>;
     ownerInfo: {
       wallet: Address;
     };
   }): Promise<MakeInstructionResult<{}>> {
-    const {
-      ownerPosition,
-      ownerInfo,
-    } = params;
+    const { ownerPosition, ownerInfo } = params;
 
     // Create a fake owner signer - used only to build the ix
     const fakeNftOwnerSigner = getFakeSigner(ownerInfo.wallet);
 
-    const [personalPosition] = await PdaUtils.getPositionStatePda(ownerPosition.data.nftMint);
+    const [personalPosition] = await PdaUtils.getPositionStatePda(
+      ownerPosition.data.nftMint,
+    );
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.data.nftMint,
       owner: ownerInfo.wallet,
@@ -373,7 +402,9 @@ export class PositionManager {
    * @param positionMint - Position NFT mint
    * @returns Position information
    */
-  async getPosition(positionMint: Address): Promise<PersonalPositionState | null> {
+  async getPosition(
+    positionMint: Address,
+  ): Promise<PersonalPositionState | null> {
     try {
       const positionStatePda = await PdaUtils.getPositionStatePda(positionMint);
       const positionState = await fetchMaybePersonalPositionState(
@@ -402,7 +433,7 @@ export class PositionManager {
    * @returns Array of positions owned by the wallet
    */
   async getPositionsForWallet(wallet: Address): Promise<PositionInfo[]> {
-    // TODO: 
+    // TODO:
     return [];
   }
 
