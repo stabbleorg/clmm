@@ -33,11 +33,12 @@ export class PositionManager {
   constructor(private readonly config: ClmmSdkConfig) {}
 
   /**
-   * Make open position V2 instructions
+   * Make open position from liquidity instructions
+   * Use this when you know the exact liquidity amount you want to provide
    * @param params - Position opening parameters
    * @returns Instruction result following Raydium pattern
    */
-  async makeOpenPositionV2Instructions(params: {
+  async makeOpenPositionFromLiquidityInstructions(params: {
     programId: Address;
     poolAccount: Account<PoolState, Address>;
     ownerInfo: {
@@ -141,6 +142,136 @@ export class PositionManager {
       amount1Max: amountMaxB,
       withMetadata,
       baseFlag: null,
+    });
+
+    return {
+      instructions: [instruction],
+      signers,
+      instructionTypes: ["OpenPositionV2"],
+      address: {
+        positionNftMint: nftMintAccount.address,
+        positionNftAccount: positionNftAccountPda,
+        metadataAccount: metadataPda,
+        personalPosition: positionStatePda,
+      },
+      lookupTableAddress: [],
+    };
+  }
+
+  /**
+   * Make open position from base token amount instructions
+   * Use this when you know how much of one specific token you want to deposit
+   * @param params - Position opening parameters
+   * @returns Instruction result following Raydium pattern
+   */
+  async makeOpenPositionFromBaseInstructions(params: {
+    programId: Address;
+    poolAccount: Account<PoolState, Address>;
+    ownerInfo: {
+      feePayer: TransactionSigner;
+      wallet: Address;
+      tokenAccountA: Address;
+      tokenAccountB: Address;
+      useSOLBalance?: boolean;
+    };
+    tickLower: number;
+    tickUpper: number;
+    base: "MintA" | "MintB";
+    baseAmount: bigint;
+    otherAmountMax: bigint;
+    withMetadata?: boolean;
+    getEphemeralSigners?: () => TransactionSigner[];
+  }): Promise<
+    MakeInstructionResult<{
+      positionNftMint: Address;
+      positionNftAccount: Address;
+      metadataAccount: Address;
+      personalPosition: Address;
+    }>
+  > {
+    const {
+      poolAccount,
+      ownerInfo,
+      tickLower,
+      tickUpper,
+      base,
+      baseAmount,
+      otherAmountMax,
+      withMetadata = true,
+      getEphemeralSigners,
+    } = params;
+
+    const signers: TransactionSigner[] = [];
+
+    // Generate position NFT mint
+    let nftMintAccount: TransactionSigner;
+    if (getEphemeralSigners) {
+      nftMintAccount = getEphemeralSigners()[0];
+    } else {
+      let k = await generateKeyPairSigner();
+      signers.push(k);
+      nftMintAccount = k;
+    }
+
+    // Get tick array start indices
+    const tickArrayLowerStartIndex = TickUtils.getTickArrayStartIndex(
+      tickLower,
+      poolAccount.data.tickSpacing,
+    );
+    const tickArrayUpperStartIndex = TickUtils.getTickArrayStartIndex(
+      tickUpper,
+      poolAccount.data.tickSpacing,
+    );
+
+    // Derive position state PDA
+    const [positionStatePda] = await PdaUtils.getPositionStatePda(
+      nftMintAccount.address,
+    );
+
+    // Get metadata PDA
+    const [metadataPda] = await getMetadataPda(nftMintAccount.address);
+
+    // Get position NFT token account
+    const [positionNftAccountPda] = await findAssociatedTokenPda({
+      mint: nftMintAccount.address,
+      owner: ownerInfo.wallet,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+
+    // Get protocol position
+    const [protocolPositionPda] = await PdaUtils.getProtocolPositionStatePda(
+      poolAccount.address,
+      tickLower,
+      tickUpper,
+    );
+
+    // Determine amounts based on base token
+    const amount0Max = base === "MintA" ? baseAmount : otherAmountMax;
+    const amount1Max = base === "MintA" ? otherAmountMax : baseAmount;
+
+    const instruction = await getOpenPositionV2InstructionAsync({
+      payer: ownerInfo.feePayer,
+      positionNftOwner: ownerInfo.wallet,
+      positionNftMint: nftMintAccount,
+      positionNftAccount: positionNftAccountPda,
+      metadataAccount: metadataPda,
+      poolState: poolAccount.address,
+      protocolPosition: protocolPositionPda,
+      tokenAccount0: ownerInfo.tokenAccountA,
+      tokenAccount1: ownerInfo.tokenAccountB,
+      tokenVault0: poolAccount.data.tokenVault0,
+      tokenVault1: poolAccount.data.tokenVault1,
+      vault0Mint: poolAccount.data.tokenMint0,
+      vault1Mint: poolAccount.data.tokenMint1,
+      tickLowerIndex: tickLower,
+      tickUpperIndex: tickUpper,
+      tickArrayLowerStartIndex,
+      tickArrayUpperStartIndex,
+      liquidity: BigInt(0),
+      amount0Max,
+      amount1Max,
+      withMetadata,
+      baseFlag: base === "MintA" ? true : false, // true = MintA is base, false = MintB is base
     });
 
     return {
