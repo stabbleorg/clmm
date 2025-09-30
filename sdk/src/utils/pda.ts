@@ -34,19 +34,13 @@ export class PdaUtils {
     tokenMintA: Address,
     tokenMintB: Address,
   ): Promise<ProgramDerivedAddress> {
-    // Ensure consistent ordering (token0 < token1)
-    const [token0, token1] =
-      tokenMintA < tokenMintB
-        ? [tokenMintA, tokenMintB]
-        : [tokenMintB, tokenMintA];
-
     return await getProgramDerivedAddress({
       programAddress: STABBLE_CLMM_PROGRAM_ID,
       seeds: [
         PDA_SEEDS.POOL_STATE,
         addressEncoder.encode(ammConfig),
-        addressEncoder.encode(token0),
-        addressEncoder.encode(token1),
+        addressEncoder.encode(tokenMintA),
+        addressEncoder.encode(tokenMintB),
       ],
     });
   }

@@ -58,17 +58,19 @@ export class PoolManager {
     // Ensure correct token order
     const addressA = address(tokenMintA);
     const addressB = address(tokenMintB);
-    const isBFirst = Buffer.from(addressB).compare(Buffer.from(addressA)) > 0;
+    const isAFirst = new BN(Buffer.from(addressB)).gt(
+      new BN(Buffer.from(addressA)),
+    );
 
-    const [token0, token1, decimals0, decimals1, priceAdjusted] = isBFirst
+    const [token0, token1, decimals0, decimals1, priceAdjusted] = isAFirst
       ? [
-          tokenMintB,
           tokenMintA,
-          mintBDecimals,
+          tokenMintB,
           mintADecimals,
+          mintBDecimals,
           new Decimal(1).div(initialPrice),
         ]
-      : [tokenMintA, tokenMintB, mintADecimals, mintBDecimals, initialPrice];
+      : [tokenMintB, tokenMintA, mintBDecimals, mintADecimals, initialPrice];
 
     const initialPriceX64 = SqrtPriceMath.priceToSqrtPriceX64(
       priceAdjusted,
