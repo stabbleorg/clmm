@@ -215,6 +215,7 @@ pub fn create_pool(ctx: Context<CreatePool>, sqrt_price_x64: u128, open_time: u6
         tick,
         token_vault_0: ctx.accounts.token_vault_0.key(),
         token_vault_1: ctx.accounts.token_vault_1.key(),
+        amm_config: ctx.accounts.amm_config.key(),
     });
     Ok(())
 }

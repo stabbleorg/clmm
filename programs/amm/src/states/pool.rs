@@ -705,6 +705,9 @@ pub struct PoolCreatedEvent {
     pub token_vault_0: Pubkey,
     /// Vault of token_1
     pub token_vault_1: Pubkey,
+
+    /// The PublicKey of the config account with fee rates etc
+    pub amm_config: Pubkey
 }
 
 /// Emitted when the collected protocol fees are withdrawn by the factory owner
