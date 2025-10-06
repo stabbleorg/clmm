@@ -1,13 +1,17 @@
-import type { ClmmSdkConfig } from './types';
-import { Clmm } from './clmm';
-import { PoolManager } from './pool-manager';
-import { PositionManager } from './position-manager';
+import type { ClmmSdkConfig } from "./types";
+import { Clmm } from "./clmm";
+import { PoolManager } from "./pool-manager";
+import { PositionManager } from "./position-manager";
+import { ClmmApi } from "./api";
 // import { SwapManager } from './swap';
 // import { RewardsManager } from './rewards';
 
 export class ClmmSdk {
   /** Core CLMM functionality (Raydium-style) */
   public readonly clmm: Clmm;
+
+  /** API functionality */
+  public readonly api: ClmmApi;
 
   /** Pool management functionality */
   public readonly pools: PoolManager;
@@ -27,6 +31,7 @@ export class ClmmSdk {
   constructor(config: ClmmSdkConfig) {
     this.config = config;
     this.clmm = new Clmm(config);
+    this.api = new ClmmApi(config.apiConfig);
     this.pools = new PoolManager(config);
     this.positions = new PositionManager(config);
     // this.swap = new SwapManager(config);
@@ -50,15 +55,18 @@ export class ClmmSdk {
    * @returns Program address
    */
   getProgramAddress(): string {
-    return this.config.programAddress || '6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6';
+    return (
+      this.config.programAddress ||
+      "6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6"
+    );
   }
 
   /**
    * Get the current commitment level
    * @returns Commitment level
    */
-  getCommitment(): 'processed' | 'confirmed' | 'finalized' {
-    return this.config.commitment || 'confirmed';
+  getCommitment(): "processed" | "confirmed" | "finalized" {
+    return this.config.commitment || "confirmed";
   }
 }
 

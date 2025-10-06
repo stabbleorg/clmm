@@ -11,6 +11,7 @@ import {
   getDecreaseLiquidityV2Instruction,
   getClosePositionInstruction,
   fetchMaybePersonalPositionState,
+  fetchMaybePoolState,
   PersonalPositionState,
   PoolState,
 } from "./generated";
@@ -27,7 +28,9 @@ import {
   TOKEN_PROGRAM_ADDRESS,
   findAssociatedTokenPda,
 } from "@solana-program/token";
-import { getFakeSigner, TickUtils } from "./utils";
+import { TickUtils, PoolUtils, SqrtPriceMath } from "./utils";
+import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import BN from "bn.js";
 
 export class PositionManager {
   constructor(private readonly config: ClmmSdkConfig) {}
@@ -166,8 +169,7 @@ export class PositionManager {
   async makeOpenPositionFromBaseInstructions(params: {
     poolAccount: Account<PoolState, Address>;
     ownerInfo: {
-      feePayer: TransactionSigner;
-      wallet: Address;
+      wallet: TransactionSigner;
       tokenAccountA: Address;
       tokenAccountB: Address;
       useSOLBalance?: boolean;
@@ -212,13 +214,24 @@ export class PositionManager {
     }
 
     // Get tick array start indices
-    const tickArrayLowerStartIndex = TickUtils.getTickArrayStartIndex(
+    const tickArrayLowerStartIndex = TickUtils.getTickArrayStartIndexByTick(
       tickLower,
       poolAccount.data.tickSpacing,
     );
-    const tickArrayUpperStartIndex = TickUtils.getTickArrayStartIndex(
+    const tickArrayUpperStartIndex = TickUtils.getTickArrayStartIndexByTick(
       tickUpper,
       poolAccount.data.tickSpacing,
+    );
+
+    // Get tick arrays for lower and upper ticks
+    const [tickArrayLower] = await PdaUtils.getTickArrayStatePda(
+      poolAccount.address,
+      tickArrayLowerStartIndex,
+    );
+
+    const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
+      poolAccount.address,
+      tickArrayUpperStartIndex,
     );
 
     // Derive position state PDA
@@ -232,7 +245,7 @@ export class PositionManager {
     // Get position NFT token account
     const [positionNftAccountPda] = await findAssociatedTokenPda({
       mint: nftMintAccount.address,
-      owner: ownerInfo.wallet,
+      owner: ownerInfo.wallet.address,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
     });
 
@@ -248,8 +261,8 @@ export class PositionManager {
     const amount1Max = base === "MintA" ? otherAmountMax : baseAmount;
 
     const instruction = await getOpenPositionV2InstructionAsync({
-      payer: ownerInfo.feePayer,
-      positionNftOwner: ownerInfo.wallet,
+      payer: ownerInfo.wallet,
+      positionNftOwner: ownerInfo.wallet.address,
       positionNftMint: nftMintAccount,
       positionNftAccount: positionNftAccountPda,
       metadataAccount: metadataPda,
@@ -265,6 +278,8 @@ export class PositionManager {
       tickUpperIndex: tickUpper,
       tickArrayLowerStartIndex,
       tickArrayUpperStartIndex,
+      tickArrayLower,
+      tickArrayUpper,
       liquidity: BigInt(0),
       amount0Max,
       amount1Max,
@@ -295,7 +310,7 @@ export class PositionManager {
     ownerPosition: Account<PersonalPositionState>;
     poolState: Account<PoolState, Address>;
     ownerInfo: {
-      wallet: Address;
+      wallet: TransactionSigner;
       tokenAccountA: Address;
       tokenAccountB: Address;
     };
@@ -312,15 +327,12 @@ export class PositionManager {
       amountMaxB,
     } = params;
 
-    // Create a fake owner signer - used only to build the ix
-    const fakeNftOwnerSigner = getFakeSigner(ownerInfo.wallet);
-
     const [personalPosition] = await PdaUtils.getPositionStatePda(
       ownerPosition.data.nftMint,
     );
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.data.nftMint,
-      owner: ownerInfo.wallet,
+      owner: ownerInfo.wallet.address,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
     });
 
@@ -349,7 +361,7 @@ export class PositionManager {
     );
 
     const instruction = getIncreaseLiquidityV2Instruction({
-      nftOwner: fakeNftOwnerSigner,
+      nftOwner: ownerInfo.wallet,
       nftAccount: positionNftAccount,
       personalPosition,
       poolState: poolState.address,
@@ -393,7 +405,7 @@ export class PositionManager {
     ownerPosition: Account<PersonalPositionState>;
     poolState: Account<PoolState, Address>;
     ownerInfo: {
-      wallet: Address;
+      wallet: TransactionSigner;
       tokenAccountA: Address;
       tokenAccountB: Address;
     };
@@ -410,15 +422,12 @@ export class PositionManager {
       amountMinB,
     } = params;
 
-    // Create a fake owner signer - used only to build the ix
-    const fakeNftOwnerSigner = getFakeSigner(ownerInfo.wallet);
-
     const [personalPosition] = await PdaUtils.getPositionStatePda(
       ownerPosition.data.nftMint,
     );
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.data.nftMint,
-      owner: ownerInfo.wallet,
+      owner: ownerInfo.wallet.address,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
     });
 
@@ -447,7 +456,7 @@ export class PositionManager {
     );
 
     const instruction = getDecreaseLiquidityV2Instruction({
-      nftOwner: fakeNftOwnerSigner,
+      nftOwner: ownerInfo.wallet,
       nftAccount: positionNftAccount,
       personalPosition,
       poolState: poolState.address,
@@ -489,25 +498,22 @@ export class PositionManager {
   async makeClosePositionInstructions(params: {
     ownerPosition: Account<PersonalPositionState>;
     ownerInfo: {
-      wallet: Address;
+      wallet: TransactionSigner;
     };
   }): Promise<MakeInstructionResult<{}>> {
     const { ownerPosition, ownerInfo } = params;
-
-    // Create a fake owner signer - used only to build the ix
-    const fakeNftOwnerSigner = getFakeSigner(ownerInfo.wallet);
 
     const [personalPosition] = await PdaUtils.getPositionStatePda(
       ownerPosition.data.nftMint,
     );
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.data.nftMint,
-      owner: ownerInfo.wallet,
+      owner: ownerInfo.wallet.address,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
     });
 
     const instruction = getClosePositionInstruction({
-      nftOwner: fakeNftOwnerSigner,
+      nftOwner: ownerInfo.wallet,
       positionNftMint: ownerPosition.data.nftMint,
       positionNftAccount,
       personalPosition,
@@ -554,156 +560,184 @@ export class PositionManager {
   }
 
   /**
-   * Get all positions for a wallet
-   * @param wallet - Wallet address
-   * @returns Array of positions owned by the wallet
+   * Enrich position state with computed fields from pool data
+   * @param position - Raw position state from blockchain
+   * @param pool - Pool state from blockchain
+   * @returns Enriched position info with calculated amounts and prices
    */
-  async getPositionsForWallet(wallet: Address): Promise<PositionInfo[]> {
-    // TODO:
-    return [];
+  enrichPositionInfo(
+    position: PersonalPositionState,
+    pool: PoolState,
+  ): PositionInfo {
+    // Calculate sqrt prices for tick boundaries
+    const sqrtPriceLowerX64 = SqrtPriceMath.getSqrtPriceX64FromTick(
+      position.tickLowerIndex,
+    );
+    const sqrtPriceUpperX64 = SqrtPriceMath.getSqrtPriceX64FromTick(
+      position.tickUpperIndex,
+    );
+    const sqrtPriceCurrentX64 = new BN(pool.sqrtPriceX64.toString());
+
+    // Calculate token amounts from liquidity based on position relative to current price
+    let amount0: BN;
+    let amount1: BN;
+
+    const liquidity = new BN(position.liquidity.toString());
+
+    if (pool.tickCurrent < position.tickLowerIndex) {
+      // Position is above current price - only token0 has value
+      amount0 = PoolUtils.getAmount0FromLiquidity(
+        sqrtPriceLowerX64,
+        sqrtPriceUpperX64,
+        liquidity,
+      );
+      amount1 = new BN(0);
+    } else if (pool.tickCurrent >= position.tickUpperIndex) {
+      // Position is below current price - only token1 has value
+      amount0 = new BN(0);
+      amount1 = PoolUtils.getAmount1FromLiquidity(
+        sqrtPriceLowerX64,
+        sqrtPriceUpperX64,
+        liquidity,
+      );
+    } else {
+      // Position is in range - both tokens have value
+      amount0 = PoolUtils.getAmount0FromLiquidity(
+        sqrtPriceCurrentX64,
+        sqrtPriceUpperX64,
+        liquidity,
+      );
+      amount1 = PoolUtils.getAmount1FromLiquidity(
+        sqrtPriceLowerX64,
+        sqrtPriceCurrentX64,
+        liquidity,
+      );
+    }
+
+    // Calculate human-readable prices from ticks
+    const priceLower = TickUtils.tickToPrice(
+      position.tickLowerIndex,
+      pool.mintDecimals0,
+      pool.mintDecimals1,
+    );
+    const priceUpper = TickUtils.tickToPrice(
+      position.tickUpperIndex,
+      pool.mintDecimals0,
+      pool.mintDecimals1,
+    );
+
+    // Determine if position is in range
+    const inRange =
+      pool.tickCurrent >= position.tickLowerIndex &&
+      pool.tickCurrent < position.tickUpperIndex;
+
+    // Map uncollected fees
+    const unclaimedFees = {
+      token0: new BN(position.tokenFeesOwed0.toString()),
+      token1: new BN(position.tokenFeesOwed1.toString()),
+    };
+
+    // TODO: Calculate position age from blockchain timestamp
+    // For now, set to 0 as we don't have creation timestamp readily available
+    const ageSeconds = 0;
+
+    return {
+      ...position,
+      tokenMint0: pool.tokenMint0,
+      tokenMint1: pool.tokenMint1,
+      amount0: BigInt(amount0.toString()),
+      amount1: BigInt(amount1.toString()),
+      priceRange: {
+        lower: priceLower,
+        upper: priceUpper,
+      },
+      inRange,
+      ageSeconds,
+      unclaimedFees,
+      // valueUsd is optional and requires external price feeds
+      valueUsd: undefined,
+      // unclaimedRewards is optional
+      unclaimedRewards: undefined,
+    };
   }
 
-  //
-  // NOTE: Currently Disabled
-  //
-  // /**
-  //  * Calculate position value in terms of underlying tokens
-  //  * @param positionMint - Position NFT mint
-  //  * @returns Token amounts and USD value
-  //  */
-  // async calculatePositionValue(positionMint: Address): Promise<{
-  //   amount0: bigint;
-  //   amount1: bigint;
-  //   valueUsd?: number;
-  // }> {
-  //   const position = await this.getPosition(positionMint);
-  //   if (!position) {
-  //     throw new ClmmError(
-  //       ClmmErrorCode.POSITION_NOT_FOUND,
-  //       "Position does not exist",
-  //     );
-  //   }
-  //
-  //   const poolState = await this.getPoolState(position.poolId);
-  //
-  //   const [amount0, amount1] = MathUtils.getAmountsFromLiquidity(
-  //     position.liquidity,
-  //     Number(position.tickLowerIndex),
-  //     Number(position.tickUpperIndex),
-  //     poolState.tickCurrent,
-  //   );
-  //
-  //   return {
-  //     amount0,
-  //     amount1,
-  //     // valueUsd would be calculated with external price data
-  //     valueUsd: undefined,
-  //   };
-  // }
+  /**
+   * Get all positions for a wallet with enriched information
+   * @param wallet - Wallet address
+   * @returns Array of enriched positions owned by the wallet
+   */
+  async getPositionsForWallet(wallet: Address): Promise<PositionInfo[]> {
+    try {
+      // Fetch SPL token accounts
+      const response = await this.config.rpc
+        .getTokenAccountsByOwner(
+          wallet,
+          { programId: TOKEN_PROGRAM_ADDRESS },
+          { encoding: "jsonParsed" },
+        )
+        .send();
 
-  //
-  // NOTE: Currently Disabled
-  //
-  // /**
-  //  * Convert price range to tick range
-  //  * @param priceRange - Price range
-  //  * @param tickSpacing - Pool tick spacing
-  //  * @returns Tick range
-  //  */
-  // priceRangeToTickRange(
-  //   priceRange: PriceRange,
-  //   tickSpacing: number,
-  //   decimalsA: number,
-  //   decimalsB: number,
-  // ): TickRange {
-  //   const lowerSqrtPrice = SqrtPriceMath.priceToSqrtPriceX64(
-  //     priceRange.lower,
-  //     decimalsA,
-  //     decimalsB,
-  //   );
-  //   const upperSqrtPrice = MathUtils.priceToSqrtPriceX64(
-  //     priceRange.upper,
-  //     decimalsA,
-  //     decimalsB,
-  //   );
-  //
-  //   const lowerTick = MathUtils.alignTickToSpacing(
-  //     MathUtils.sqrtPriceX64ToTick(lowerSqrtPrice),
-  //     tickSpacing,
-  //   );
-  //   const upperTick = MathUtils.alignTickToSpacing(
-  //     MathUtils.sqrtPriceX64ToTick(upperSqrtPrice),
-  //     tickSpacing,
-  //   );
-  //
-  //   return {
-  //     lower: lowerTick,
-  //     upper: upperTick,
-  //   };
-  // }
+      // Fetch Token-2022 accounts
+      const response22 = await this.config.rpc
+        .getTokenAccountsByOwner(
+          wallet,
+          { programId: TOKEN_2022_PROGRAM_ADDRESS },
+          { encoding: "jsonParsed" },
+        )
+        .send();
 
-  //
-  // NOTE: Disabled
-  //
-  // /**
-  //  * Convert tick range to price range
-  //  * @param tickRange - Tick range
-  //  * @returns Price range
-  //  */
-  // tickRangeToPriceRange(
-  //   tickRange: TickRange,
-  //   decimalsA: number,
-  //   decimalsB: number,
-  // ): PriceRange {
-  //   const lowerSqrtPrice = MathUtils.tickToSqrtPriceX64(tickRange.lower);
-  //   const upperSqrtPrice = MathUtils.tickToSqrtPriceX64(tickRange.upper);
-  //
-  //   return {
-  //     lower: MathUtils.sqrtPriceX64ToPrice(
-  //       lowerSqrtPrice,
-  //       decimalsA,
-  //       decimalsB,
-  //     ),
-  //     upper: MathUtils.sqrtPriceX64ToPrice(
-  //       upperSqrtPrice,
-  //       decimalsA,
-  //       decimalsB,
-  //     ),
-  //   };
-  // }
+      const allAccounts = [...response.value, ...response22.value];
 
-  // /**
-  //  * Enrich position state with calculated fields
-  //  */
-  // private enrichPositionInfo(positionState: any): PositionInfo {
-  //   const ageSeconds =
-  //     Math.floor(Date.now() / 1000) - Number(positionState.recentEpoch);
-  //
-  //   // Calculate unclaimed fees (simplified)
-  //   const unclaimedFees = {
-  //     token0: positionState.tokenFeesOwed0,
-  //     token1: positionState.tokenFeesOwed1,
-  //   };
-  //
-  //   // Extract unclaimed rewards
-  //   const unclaimedRewards = positionState.rewardInfos
-  //     .filter((reward: any) => reward.rewardOwedClaimed > 0n)
-  //     .map((reward: any) => ({
-  //       mint: reward.rewardMint,
-  //       amount: reward.rewardOwedClaimed,
-  //     }));
-  //
-  //   return {
-  //     ...positionState,
-  //     unclaimedFees,
-  //     unclaimedRewards,
-  //     ageSeconds,
-  //     inRange: false, // Would be calculated based on current pool tick
-  //     priceRange: {
-  //       lower: 0, // Would be calculated from ticks
-  //       upper: 0, // Would be calculated from ticks
-  //     },
-  //     valueUsd: undefined,
-  //   };
-  // }
+      const nftTokenAccounts = allAccounts.filter((account) => {
+        const parsedInfo = account.account.data.parsed.info;
+        return (
+          parsedInfo.tokenAmount.amount == "1" &&
+          parsedInfo.tokenAmount.decimals == 0
+        );
+      });
+
+      // Fetch raw positions
+      const positions = await Promise.all(
+        nftTokenAccounts.map((ta) =>
+          this.getPosition(ta.account.data.parsed.info.mint),
+        ),
+      );
+
+      const validPositions = positions.filter(
+        (p) => !!p,
+      ) as PersonalPositionState[];
+
+      // Fetch pool data for each position and enrich
+      const enrichedPositions = await Promise.all(
+        validPositions.map(async (position) => {
+          try {
+            // Fetch pool state for this position
+            const poolAccount = await fetchMaybePoolState(
+              this.config.rpc,
+              position.poolId,
+              { commitment: this.config.commitment },
+            );
+
+            if (!poolAccount.exists) {
+              console.warn(`Pool ${position.poolId} not found for position`);
+              return null;
+            }
+
+            // Enrich position with pool data
+            return this.enrichPositionInfo(position, poolAccount.data);
+          } catch (error) {
+            console.error(`Failed to enrich position: ${error}`);
+            return null;
+          }
+        }),
+      );
+
+      return enrichedPositions.filter((p) => !!p) as PositionInfo[];
+    } catch (error) {
+      throw new ClmmError(
+        ClmmErrorCode.POSITION_NOT_FOUND,
+        `Failed to fetch positions for user: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
+    }
+  }
 }

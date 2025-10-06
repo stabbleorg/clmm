@@ -1,12 +1,14 @@
-/**
- * Tick array utilities for CLMM operations
- * Handles tick spacing, initialization, and array management
- */
-
-import { ClusterUrl, createSolanaRpc, RpcTransportFromClusterUrl, type Address, type Rpc } from "@solana/kit";
+import { ClusterUrl, type Address } from "@solana/kit";
 import { ClmmError, ClmmErrorCode } from "../types";
 import { MIN_TICK, MAX_TICK, TICKS_PER_ARRAY } from "../constants";
-import { PdaUtils } from "./pda";
+import { SqrtPriceMath, TickMath } from "./math";
+import Decimal from "decimal.js";
+import BN from "bn.js";
+import { TickQuery } from "./tickQuery";
+import { TickArrayBitmapExtension } from "../generated";
+
+export const TICK_ARRAY_SIZE = 60;
+export const TICK_ARRAY_BITMAP_SIZE = 512;
 
 /**
  * Individual tick state
@@ -39,6 +41,17 @@ export interface TickArray {
   initializedTickCount: number;
 }
 
+export interface ReturnTypeGetPriceAndTick {
+  tick: number;
+  price: Decimal;
+}
+
+export interface ReturnTypeGetTickPrice {
+  tick: number;
+  price: Decimal;
+  tickSqrtPriceX64: BN;
+}
+
 /**
  * Tick utility functions
  */
@@ -52,13 +65,13 @@ export class TickUtils {
     if (tick < MIN_TICK) {
       throw new ClmmError(
         ClmmErrorCode.TICK_MUST_BE_GTE_MINIMUM_TICK,
-        `Tick ${tick} must be >= ${MIN_TICK}`
+        `Tick ${tick} must be >= ${MIN_TICK}`,
       );
     }
     if (tick > MAX_TICK) {
       throw new ClmmError(
         ClmmErrorCode.TICK_MUST_BE_LTE_MAXIMUM_TICK,
-        `Tick ${tick} must be <= ${MAX_TICK}`
+        `Tick ${tick} must be <= ${MAX_TICK}`,
       );
     }
   }
@@ -70,28 +83,32 @@ export class TickUtils {
    * @param tickSpacing - Tick spacing for the pool
    * @throws ClmmError if range is invalid
    */
-  static validateTickRange(tickLower: number, tickUpper: number, tickSpacing: number): void {
+  static validateTickRange(
+    tickLower: number,
+    tickUpper: number,
+    tickSpacing: number,
+  ): void {
     this.validateTick(tickLower);
     this.validateTick(tickUpper);
 
     if (tickLower >= tickUpper) {
       throw new ClmmError(
         ClmmErrorCode.LOWER_TICK_MUST_BE_BELOW_UPPER_TICK,
-        `Lower tick ${tickLower} must be below upper tick ${tickUpper}`
+        `Lower tick ${tickLower} must be below upper tick ${tickUpper}`,
       );
     }
 
     if (tickLower % tickSpacing !== 0) {
       throw new ClmmError(
         ClmmErrorCode.TICK_MUST_BE_DIVISIBLE_BY_TICK_SPACING,
-        `Lower tick ${tickLower} must be divisible by tick spacing ${tickSpacing}`
+        `Lower tick ${tickLower} must be divisible by tick spacing ${tickSpacing}`,
       );
     }
 
     if (tickUpper % tickSpacing !== 0) {
       throw new ClmmError(
         ClmmErrorCode.TICK_MUST_BE_DIVISIBLE_BY_TICK_SPACING,
-        `Upper tick ${tickUpper} must be divisible by tick spacing ${tickSpacing}`
+        `Upper tick ${tickUpper} must be divisible by tick spacing ${tickSpacing}`,
       );
     }
   }
@@ -129,7 +146,7 @@ export class TickUtils {
   /**
    * Get all tick array start indices needed for a price range
    * @param tickLower - Lower tick of range
-   * @param tickUpper - Upper tick of range  
+   * @param tickUpper - Upper tick of range
    * @param tickSpacing - Tick spacing of the pool
    * @param tickCurrent - Current pool tick
    * @returns Array of start indices
@@ -138,13 +155,20 @@ export class TickUtils {
     tickLower: number,
     tickUpper: number,
     tickSpacing: number,
-    tickCurrent: number
+    tickCurrent: number,
   ): number[] {
     const startIndexLower = this.getTickArrayStartIndex(tickLower, tickSpacing);
     const startIndexUpper = this.getTickArrayStartIndex(tickUpper, tickSpacing);
-    const startIndexCurrent = this.getTickArrayStartIndex(tickCurrent, tickSpacing);
+    const startIndexCurrent = this.getTickArrayStartIndex(
+      tickCurrent,
+      tickSpacing,
+    );
 
-    const indices = new Set([startIndexLower, startIndexUpper, startIndexCurrent]);
+    const indices = new Set([
+      startIndexLower,
+      startIndexUpper,
+      startIndexCurrent,
+    ]);
     return Array.from(indices).sort((a, b) => a - b);
   }
 
@@ -160,7 +184,7 @@ export class TickUtils {
     ticks: Tick[],
     startTick: number,
     tickSpacing: number,
-    zeroForOne: boolean
+    zeroForOne: boolean,
   ): { tick: number; found: boolean } {
     if (zeroForOne) {
       // Find next initialized tick below current tick
@@ -190,7 +214,11 @@ export class TickUtils {
    * @param decimalsB - Token B decimals
    * @returns Tick index
    */
-  static priceToTick(price: number, decimalsA: number, decimalsB: number): number {
+  static priceToTick(
+    price: number,
+    decimalsA: number,
+    decimalsB: number,
+  ): number {
     const adjustedPrice = price * Math.pow(10, decimalsA - decimalsB);
     const tickFloat = Math.log(adjustedPrice) / Math.log(1.0001);
     return Math.floor(tickFloat);
@@ -203,7 +231,11 @@ export class TickUtils {
    * @param decimalsB - Token B decimals
    * @returns Price (token1/token0)
    */
-  static tickToPrice(tick: number, decimalsA: number, decimalsB: number): number {
+  static tickToPrice(
+    tick: number,
+    decimalsA: number,
+    decimalsB: number,
+  ): number {
     const price = Math.pow(1.0001, tick);
     return price * Math.pow(10, decimalsB - decimalsA);
   }
@@ -222,7 +254,7 @@ export class TickUtils {
     decimalsA: number,
     decimalsB: number,
     tickSpacing: number,
-    roundUp: boolean = false
+    roundUp: boolean = false,
   ): number {
     const tick = this.priceToTick(price, decimalsA, decimalsB);
     return this.alignTickToSpacing(tick, tickSpacing, roundUp);
@@ -235,12 +267,20 @@ export class TickUtils {
    * @param roundUp - Whether to round up or down
    * @returns Aligned tick
    */
-  static alignTickToSpacing(tick: number, tickSpacing: number, roundUp: boolean = false): number {
+  static alignTickToSpacing(
+    tick: number,
+    tickSpacing: number,
+    roundUp: boolean = false,
+  ): number {
     const aligned = roundUp
       ? Math.ceil(tick / tickSpacing) * tickSpacing
       : Math.floor(tick / tickSpacing) * tickSpacing;
 
     return Math.max(MIN_TICK, Math.min(MAX_TICK, aligned));
+  }
+
+  public static checkIsOutOfBoundary(tick: number): boolean {
+    return tick < MIN_TICK || tick > MAX_TICK;
   }
 
   /**
@@ -249,9 +289,212 @@ export class TickUtils {
    * @param tickSpacing - Tick spacing
    * @returns Whether boundary is valid
    */
-  static isValidTickArrayBoundary(startIndex: number, tickSpacing: number): boolean {
+  static isValidTickArrayBoundary(
+    startIndex: number,
+    tickSpacing: number,
+  ): boolean {
     const arraySize = TICKS_PER_ARRAY * tickSpacing;
     return startIndex % arraySize === 0;
+  }
+
+  public static getTickArrayStartIndexByTick(
+    tickIndex: number,
+    tickSpacing: number,
+  ): number {
+    return (
+      this.getTickArrayBitIndex(tickIndex, tickSpacing) *
+      TickQuery.tickCount(tickSpacing)
+    );
+  }
+
+  public static mergeTickArrayBitmap(bns: BN[]): BN {
+    let b = new BN(0);
+    for (let i = 0; i < bns.length; i++) {
+      b = b.add(bns[i].shln(64 * i));
+    }
+    return b;
+  }
+
+  public static searchLowBitFromStart(
+    tickArrayBitmap: BN[],
+    exTickArrayBitmap: TickArrayBitmapExtension,
+    currentTickArrayBitStartIndex: number,
+    expectedCount: number,
+    tickSpacing: number,
+  ): number[] {
+    const tickArrayBitmaps = [
+      ...[...exTickArrayBitmap.negativeTickArrayBitmap].reverse(),
+      tickArrayBitmap.slice(0, 8),
+      tickArrayBitmap.slice(8, 16),
+      ...exTickArrayBitmap.positiveTickArrayBitmap,
+    ].map((bitmap) => {
+      let bns: BN[] = bitmap.map((b) => {
+        if (typeof b == "bigint") return new BN(b.toString());
+
+        return b;
+      });
+
+      return TickUtils.mergeTickArrayBitmap(bns);
+    });
+
+    const result: number[] = [];
+    while (currentTickArrayBitStartIndex >= -7680) {
+      const arrayIndex = Math.floor(
+        (currentTickArrayBitStartIndex + 7680) / 512,
+      );
+      const searchIndex = (currentTickArrayBitStartIndex + 7680) % 512;
+
+      if (tickArrayBitmaps[arrayIndex].testn(searchIndex))
+        result.push(currentTickArrayBitStartIndex);
+
+      currentTickArrayBitStartIndex--;
+      if (result.length === expectedCount) break;
+    }
+
+    const tickCount = TickQuery.tickCount(tickSpacing);
+    return result.map((i) => i * tickCount);
+  }
+
+  public static searchHightBitFromStart(
+    tickArrayBitmap: BN[],
+    exTickArrayBitmap: TickArrayBitmapExtension,
+    currentTickArrayBitStartIndex: number,
+    expectedCount: number,
+    tickSpacing: number,
+  ): number[] {
+    const tickArrayBitmaps = [
+      ...[...exTickArrayBitmap.negativeTickArrayBitmap].reverse(),
+      tickArrayBitmap.slice(0, 8),
+      tickArrayBitmap.slice(8, 16),
+      ...exTickArrayBitmap.positiveTickArrayBitmap,
+    ].map((bitmap) => {
+      let bns: BN[] = bitmap.map((b) => {
+        if (typeof b == "bigint") return new BN(b.toString());
+
+        return b;
+      });
+
+      return TickUtils.mergeTickArrayBitmap(bns);
+    });
+
+    const result: number[] = [];
+    while (currentTickArrayBitStartIndex < 7680) {
+      const arrayIndex = Math.floor(
+        (currentTickArrayBitStartIndex + 7680) / 512,
+      );
+      const searchIndex = (currentTickArrayBitStartIndex + 7680) % 512;
+
+      if (tickArrayBitmaps[arrayIndex].testn(searchIndex))
+        result.push(currentTickArrayBitStartIndex);
+
+      currentTickArrayBitStartIndex++;
+      if (result.length === expectedCount) break;
+    }
+
+    const tickCount = TickQuery.tickCount(tickSpacing);
+    return result.map((i) => i * tickCount);
+  }
+
+  public static getInitializedTickArrayInRange(
+    tickArrayBitmap: BN[],
+    exTickArrayBitmap: TickArrayBitmapExtension,
+    tickSpacing: number,
+    tickArrayStartIndex: number,
+    expectedCount: number,
+  ): number[] {
+    const tickArrayOffset = Math.floor(
+      tickArrayStartIndex / (tickSpacing * TICK_ARRAY_SIZE),
+    );
+    return [
+      // find right of currenct offset
+      ...TickUtils.searchLowBitFromStart(
+        tickArrayBitmap,
+        exTickArrayBitmap,
+        tickArrayOffset - 1,
+        expectedCount,
+        tickSpacing,
+      ),
+
+      // find left of current offset
+      ...TickUtils.searchHightBitFromStart(
+        tickArrayBitmap,
+        exTickArrayBitmap,
+        tickArrayOffset,
+        expectedCount,
+        tickSpacing,
+      ),
+    ];
+  }
+
+  public static getTickArrayBitIndex(
+    tickIndex: number,
+    tickSpacing: number,
+  ): number {
+    const ticksInArray = TickQuery.tickCount(tickSpacing);
+
+    let startIndex: number = tickIndex / ticksInArray;
+    if (tickIndex < 0 && tickIndex % ticksInArray != 0) {
+      startIndex = Math.ceil(startIndex) - 1;
+    } else {
+      startIndex = Math.floor(startIndex);
+    }
+    return startIndex;
+  }
+
+  public static getTickPrice({
+    mintADecimals,
+    mintBDecimals,
+    tick,
+    baseIn,
+  }: {
+    mintADecimals: number;
+    mintBDecimals: number;
+    tick: number;
+    baseIn: boolean;
+  }): ReturnTypeGetTickPrice {
+    const tickSqrtPriceX64 = SqrtPriceMath.getSqrtPriceX64FromTick(tick);
+    const tickPrice = SqrtPriceMath.sqrtPriceX64ToPrice(
+      tickSqrtPriceX64,
+      mintADecimals,
+      mintBDecimals,
+    );
+
+    return baseIn
+      ? { tick, price: tickPrice, tickSqrtPriceX64 }
+      : { tick, price: new Decimal(1).div(tickPrice), tickSqrtPriceX64 };
+  }
+
+  public static getPriceAndTick({
+    tickSpacing,
+    mintADecimals,
+    mintBDecimals,
+    price,
+    baseIn,
+  }: {
+    tickSpacing: number;
+    mintADecimals: number;
+    mintBDecimals: number;
+    price: Decimal;
+    baseIn: boolean;
+  }): ReturnTypeGetPriceAndTick {
+    const _price = baseIn ? price : new Decimal(1).div(price);
+
+    const tick = TickMath.getTickWithPriceAndTickspacing(
+      _price,
+      tickSpacing,
+      mintADecimals,
+      mintBDecimals,
+    );
+    const tickSqrtPriceX64 = SqrtPriceMath.getSqrtPriceX64FromTick(tick);
+    const tickPrice = SqrtPriceMath.sqrtPriceX64ToPrice(
+      tickSqrtPriceX64,
+      mintADecimals,
+      mintBDecimals,
+    );
+
+    return baseIn
+      ? { tick, price: tickPrice }
+      : { tick, price: new Decimal(1).div(tickPrice) };
   }
 }
 
@@ -273,8 +516,7 @@ export async function fetchTickArraysForRange(
   tickLower: number,
   tickUpper: number,
   tickSpacing: number,
-  tickCurrent: number
+  tickCurrent: number,
 ): Promise<TickArray[]> {
-
-  return []
+  return [];
 }

@@ -1,8 +1,21 @@
-import { type Address, type TransactionSigner, address } from "@solana/kit";
+import {
+  type Address,
+  type TransactionSigner,
+  address,
+  Account,
+  Rpc,
+  SolanaRpcApi,
+  SolanaRpcApiMainnet,
+  SolanaRpcApiDevnet,
+  SolanaRpcApiTestnet,
+} from "@solana/kit";
 import {
   getCreateAmmConfigInstruction,
   fetchMaybePoolState,
   getCreatePoolInstructionAsync,
+  fetchAllPoolState,
+  getPoolStateSize,
+  PoolState,
 } from "./generated";
 
 import type {
@@ -16,7 +29,12 @@ import { ClmmError, ClmmErrorCode } from "./types";
 import { PdaUtils } from "./utils/pda";
 import { SqrtPriceMath } from "./utils/math";
 
-import { FEE_TIERS, SYSTEM_PROGRAM_ID, TICK_SPACINGS } from "./constants";
+import {
+  FEE_TIERS,
+  STABBLE_CLMM_PROGRAM_ID,
+  SYSTEM_PROGRAM_ID,
+  TICK_SPACINGS,
+} from "./constants";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import BN from "bn.js";
 import Decimal from "decimal.js";
@@ -221,13 +239,25 @@ export class PoolManager {
     return this.getPool(poolPda[0]);
   }
 
-  /**
-   * Get all pools
-   * @returns Array of pool information
-   */
-  async getAllPools(): Promise<PoolInfo[]> {
+  async getAllPools(
+    rpc: Rpc<SolanaRpcApiMainnet | SolanaRpcApiDevnet | SolanaRpcApiTestnet>,
+  ): Promise<Account<PoolState>[]> {
     try {
-      return [];
+      let accounts = await rpc
+        .getProgramAccounts(STABBLE_CLMM_PROGRAM_ID, {
+          commitment: "finalized",
+          encoding: "base64",
+          filters: [
+            {
+              dataSize: BigInt(getPoolStateSize()),
+            },
+          ],
+        })
+        .send();
+
+      let poolsAddresses = accounts.map((a) => a.pubkey);
+
+      return fetchAllPoolState(rpc, poolsAddresses);
     } catch (error) {
       throw new ClmmError(
         ClmmErrorCode.TRANSACTION_FAILED,

@@ -112,17 +112,17 @@ export class SqrtPriceMath {
 
     return zeroForOne
       ? this.getNextSqrtPriceFromTokenAmountARoundingUp(
-        sqrtPriceX64,
-        liquidity,
-        amountIn,
-        true,
-      )
+          sqrtPriceX64,
+          liquidity,
+          amountIn,
+          true,
+        )
       : this.getNextSqrtPriceFromTokenAmountBRoundingDown(
-        sqrtPriceX64,
-        liquidity,
-        amountIn,
-        true,
-      );
+          sqrtPriceX64,
+          liquidity,
+          amountIn,
+          true,
+        );
   }
 
   public static getNextSqrtPriceX64FromOutput(
@@ -140,17 +140,17 @@ export class SqrtPriceMath {
 
     return zeroForOne
       ? this.getNextSqrtPriceFromTokenAmountBRoundingDown(
-        sqrtPriceX64,
-        liquidity,
-        amountOut,
-        false,
-      )
+          sqrtPriceX64,
+          liquidity,
+          amountOut,
+          false,
+        )
       : this.getNextSqrtPriceFromTokenAmountARoundingUp(
-        sqrtPriceX64,
-        liquidity,
-        amountOut,
-        false,
-      );
+          sqrtPriceX64,
+          liquidity,
+          amountOut,
+          false,
+        );
   }
 
   private static getNextSqrtPriceFromTokenAmountARoundingUp(
@@ -181,7 +181,11 @@ export class SqrtPriceMath {
         );
       }
       const denominator = liquidityLeftShift.sub(amountMulSqrtPrice);
-      return MathUtils.mulDivCeil(liquidityLeftShift, sqrtPriceX64, denominator);
+      return MathUtils.mulDivCeil(
+        liquidityLeftShift,
+        sqrtPriceX64,
+        denominator,
+      );
     }
   }
 
@@ -394,13 +398,13 @@ export class LiquidityMath {
 
     return roundUp
       ? MathUtils.mulDivRoundingUp(
-        MathUtils.mulDivCeil(numerator1, numerator2, sqrtPriceX64B),
-        ONE,
-        sqrtPriceX64A,
-      )
+          MathUtils.mulDivCeil(numerator1, numerator2, sqrtPriceX64B),
+          ONE,
+          sqrtPriceX64A,
+        )
       : MathUtils.mulDivFloor(numerator1, numerator2, sqrtPriceX64B).div(
-        sqrtPriceX64A,
-      );
+          sqrtPriceX64A,
+        );
   }
 
   public static getTokenAmountBFromLiquidity(

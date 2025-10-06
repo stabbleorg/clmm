@@ -70,11 +70,14 @@ export class PoolUtils {
    * @param ammConfig - AMM configuration
    * @returns Computed pool information
    */
-  static computePoolInfo(poolState: PoolState, _ammConfig: AmmConfig): ComputedPoolInfo {
+  static computePoolInfo(
+    poolState: PoolState,
+    _ammConfig: AmmConfig,
+  ): ComputedPoolInfo {
     const currentPrice = SqrtPriceMath.sqrtPriceX64ToPrice(
       new BN(poolState.sqrtPriceX64.toString()),
       poolState.mintDecimals0,
-      poolState.mintDecimals1
+      poolState.mintDecimals1,
     );
 
     return {
@@ -104,17 +107,19 @@ export class PoolUtils {
     inputMint: Address,
     amountIn: BN,
     _slippageTolerance: number = 0.01,
-    tickArrays: TickArray[] = []
+    tickArrays: TickArray[] = [],
   ): SwapResult {
     if (amountIn.lte(ZERO)) {
       throw new ClmmError(
         ClmmErrorCode.SWAP_AMOUNT_CANNOT_BE_ZERO,
-        'Swap amount cannot be zero'
+        "Swap amount cannot be zero",
       );
     }
 
     const zeroForOne = inputMint === poolInfo.poolState.tokenMint0;
-    const sqrtPriceLimitX64 = zeroForOne ? MIN_SQRT_RATIO.add(ONE) : MAX_SQRT_RATIO.sub(ONE);
+    const sqrtPriceLimitX64 = zeroForOne
+      ? MIN_SQRT_RATIO.add(ONE)
+      : MAX_SQRT_RATIO.sub(ONE);
 
     return this.computeSwap(
       poolInfo,
@@ -122,7 +127,7 @@ export class PoolUtils {
       sqrtPriceLimitX64,
       zeroForOne,
       true, // exactInput
-      tickArrays
+      tickArrays,
     );
   }
 
@@ -140,17 +145,19 @@ export class PoolUtils {
     outputMint: Address,
     amountOut: BN,
     _slippageTolerance: number = 0.01,
-    tickArrays: TickArray[] = []
+    tickArrays: TickArray[] = [],
   ): SwapResult {
     if (amountOut.lte(ZERO)) {
       throw new ClmmError(
         ClmmErrorCode.SWAP_AMOUNT_CANNOT_BE_ZERO,
-        'Swap amount cannot be zero'
+        "Swap amount cannot be zero",
       );
     }
 
     const zeroForOne = outputMint === poolInfo.poolState.tokenMint1;
-    const sqrtPriceLimitX64 = zeroForOne ? MIN_SQRT_RATIO.add(ONE) : MAX_SQRT_RATIO.sub(ONE);
+    const sqrtPriceLimitX64 = zeroForOne
+      ? MIN_SQRT_RATIO.add(ONE)
+      : MAX_SQRT_RATIO.sub(ONE);
 
     return this.computeSwap(
       poolInfo,
@@ -158,7 +165,7 @@ export class PoolUtils {
       sqrtPriceLimitX64,
       zeroForOne,
       false, // exactOutput
-      tickArrays
+      tickArrays,
     );
   }
 
@@ -178,21 +185,27 @@ export class PoolUtils {
     sqrtPriceLimitX64: BN,
     zeroForOne: boolean,
     exactInput: boolean,
-    _tickArrays: TickArray[]
+    _tickArrays: TickArray[],
   ): SwapResult {
     // Validate price limit
     if (zeroForOne) {
-      if (sqrtPriceLimitX64.gte(poolInfo.sqrtPriceX64) || sqrtPriceLimitX64.lte(MIN_SQRT_RATIO)) {
+      if (
+        sqrtPriceLimitX64.gte(poolInfo.sqrtPriceX64) ||
+        sqrtPriceLimitX64.lte(MIN_SQRT_RATIO)
+      ) {
         throw new ClmmError(
           ClmmErrorCode.SQRT_PRICE_X64_OUT_OF_RANGE,
-          'Invalid sqrt price limit for zeroForOne swap'
+          "Invalid sqrt price limit for zeroForOne swap",
         );
       }
     } else {
-      if (sqrtPriceLimitX64.lte(poolInfo.sqrtPriceX64) || sqrtPriceLimitX64.gte(MAX_SQRT_RATIO)) {
+      if (
+        sqrtPriceLimitX64.lte(poolInfo.sqrtPriceX64) ||
+        sqrtPriceLimitX64.gte(MAX_SQRT_RATIO)
+      ) {
         throw new ClmmError(
           ClmmErrorCode.SQRT_PRICE_X64_OUT_OF_RANGE,
-          'Invalid sqrt price limit for oneForZero swap'
+          "Invalid sqrt price limit for oneForZero swap",
         );
       }
     }
@@ -217,7 +230,7 @@ export class PoolUtils {
       amountRemaining,
       feeBps,
       exactInput,
-      zeroForOne
+      zeroForOne,
     );
 
     sqrtPriceX64 = stepResult.sqrtPriceNextX64;
@@ -253,7 +266,7 @@ export class PoolUtils {
     amountRemaining: BN,
     feeBps: number,
     exactInput: boolean,
-    zeroForOne: boolean
+    zeroForOne: boolean,
   ): {
     sqrtPriceNextX64: BN;
     amountIn: BN;
@@ -271,56 +284,87 @@ export class PoolUtils {
       const amountRemainingLessFee = MathUtils.mulDivFloor(
         amountRemaining,
         new BN(1000000 - feeBps),
-        new BN(1000000)
+        new BN(1000000),
       );
 
       sqrtPriceNextX64 = SqrtPriceMath.getNextSqrtPriceX64FromInput(
         sqrtPriceCurrentX64,
         liquidity,
         amountRemainingLessFee,
-        zeroForOne
+        zeroForOne,
       );
     } else {
       sqrtPriceNextX64 = SqrtPriceMath.getNextSqrtPriceX64FromOutput(
         sqrtPriceCurrentX64,
         liquidity,
         amountRemaining,
-        zeroForOne
+        zeroForOne,
       );
     }
 
     const max = sqrtPriceTargetX64.eq(sqrtPriceNextX64);
 
     if (zeroForOne) {
-      sqrtPriceNextX64 = max && sqrtPriceNextX64.lt(sqrtPriceTargetX64) ?
-        sqrtPriceTargetX64 : sqrtPriceNextX64;
+      sqrtPriceNextX64 =
+        max && sqrtPriceNextX64.lt(sqrtPriceTargetX64)
+          ? sqrtPriceTargetX64
+          : sqrtPriceNextX64;
     } else {
-      sqrtPriceNextX64 = max && sqrtPriceNextX64.gt(sqrtPriceTargetX64) ?
-        sqrtPriceTargetX64 : sqrtPriceNextX64;
+      sqrtPriceNextX64 =
+        max && sqrtPriceNextX64.gt(sqrtPriceTargetX64)
+          ? sqrtPriceTargetX64
+          : sqrtPriceNextX64;
     }
 
     // Calculate amounts
     if (zeroForOne) {
-      amountIn = sqrtPriceNextX64.eq(sqrtPriceTargetX64) && exactIn ?
-        amountRemaining :
-        this.getAmount0Delta(sqrtPriceNextX64, sqrtPriceStartX64, liquidity, true);
+      amountIn =
+        sqrtPriceNextX64.eq(sqrtPriceTargetX64) && exactIn
+          ? amountRemaining
+          : this.getAmount0Delta(
+              sqrtPriceNextX64,
+              sqrtPriceStartX64,
+              liquidity,
+              true,
+            );
 
-      amountOut = this.getAmount1Delta(sqrtPriceNextX64, sqrtPriceStartX64, liquidity, false);
+      amountOut = this.getAmount1Delta(
+        sqrtPriceNextX64,
+        sqrtPriceStartX64,
+        liquidity,
+        false,
+      );
     } else {
-      amountIn = sqrtPriceNextX64.eq(sqrtPriceTargetX64) && exactIn ?
-        amountRemaining :
-        this.getAmount1Delta(sqrtPriceStartX64, sqrtPriceNextX64, liquidity, true);
+      amountIn =
+        sqrtPriceNextX64.eq(sqrtPriceTargetX64) && exactIn
+          ? amountRemaining
+          : this.getAmount1Delta(
+              sqrtPriceStartX64,
+              sqrtPriceNextX64,
+              liquidity,
+              true,
+            );
 
-      amountOut = this.getAmount0Delta(sqrtPriceStartX64, sqrtPriceNextX64, liquidity, false);
+      amountOut = this.getAmount0Delta(
+        sqrtPriceStartX64,
+        sqrtPriceNextX64,
+        liquidity,
+        false,
+      );
     }
 
     if (!exactIn && amountOut.gt(amountRemaining)) {
       amountOut = amountRemaining;
     }
 
-    const feeAmount = exactIn && !sqrtPriceNextX64.eq(sqrtPriceTargetX64) ?
-      amountRemaining.sub(amountIn) :
-      MathUtils.mulDivRoundingUp(amountIn, new BN(feeBps), new BN(1000000 - feeBps));
+    const feeAmount =
+      exactIn && !sqrtPriceNextX64.eq(sqrtPriceTargetX64)
+        ? amountRemaining.sub(amountIn)
+        : MathUtils.mulDivRoundingUp(
+            amountIn,
+            new BN(feeBps),
+            new BN(1000000 - feeBps),
+          );
 
     return {
       sqrtPriceNextX64,
@@ -342,7 +386,7 @@ export class PoolUtils {
     sqrtRatioAX64: BN,
     sqrtRatioBX64: BN,
     liquidity: BN,
-    roundUp: boolean
+    roundUp: boolean,
   ): BN {
     if (sqrtRatioAX64.gt(sqrtRatioBX64)) {
       [sqrtRatioAX64, sqrtRatioBX64] = [sqrtRatioBX64, sqrtRatioAX64];
@@ -355,13 +399,13 @@ export class PoolUtils {
       return MathUtils.mulDivRoundingUp(
         MathUtils.mulDivRoundingUp(numerator1, numerator2, sqrtRatioBX64),
         ONE,
-        sqrtRatioAX64
+        sqrtRatioAX64,
       );
     } else {
       return MathUtils.mulDivFloor(
         MathUtils.mulDivFloor(numerator1, numerator2, sqrtRatioBX64),
         ONE,
-        sqrtRatioAX64
+        sqrtRatioAX64,
       );
     }
   }
@@ -378,16 +422,24 @@ export class PoolUtils {
     sqrtRatioAX64: BN,
     sqrtRatioBX64: BN,
     liquidity: BN,
-    roundUp: boolean
+    roundUp: boolean,
   ): BN {
     if (sqrtRatioAX64.gt(sqrtRatioBX64)) {
       [sqrtRatioAX64, sqrtRatioBX64] = [sqrtRatioBX64, sqrtRatioAX64];
     }
 
     if (roundUp) {
-      return MathUtils.mulDivRoundingUp(liquidity, sqrtRatioBX64.sub(sqrtRatioAX64), Q64);
+      return MathUtils.mulDivRoundingUp(
+        liquidity,
+        sqrtRatioBX64.sub(sqrtRatioAX64),
+        Q64,
+      );
     } else {
-      return MathUtils.mulDivFloor(liquidity, sqrtRatioBX64.sub(sqrtRatioAX64), Q64);
+      return MathUtils.mulDivFloor(
+        liquidity,
+        sqrtRatioBX64.sub(sqrtRatioAX64),
+        Q64,
+      );
     }
   }
 
@@ -405,10 +457,14 @@ export class PoolUtils {
     tickLower: number,
     tickUpper: number,
     amount0Desired: BN,
-    amount1Desired: BN
+    amount1Desired: BN,
   ): LiquidityResult {
-    const sqrtRatioA = new BN(SqrtPriceMath.getTickFromSqrtPriceX64(new BN(tickLower)));
-    const sqrtRatioB = new BN(SqrtPriceMath.getTickFromSqrtPriceX64(new BN(tickUpper)));
+    const sqrtRatioA = new BN(
+      SqrtPriceMath.getTickFromSqrtPriceX64(new BN(tickLower)),
+    );
+    const sqrtRatioB = new BN(
+      SqrtPriceMath.getTickFromSqrtPriceX64(new BN(tickUpper)),
+    );
     const sqrtRatioCurrent = poolInfo.sqrtPriceX64;
 
     let liquidity: BN;
@@ -417,23 +473,47 @@ export class PoolUtils {
 
     if (poolInfo.tickCurrent < tickLower) {
       // Position is above current price, only token0 needed
-      liquidity = this.getLiquidityFromAmount0(sqrtRatioA, sqrtRatioB, amount0Desired);
+      liquidity = this.getLiquidityFromAmount0(
+        sqrtRatioA,
+        sqrtRatioB,
+        amount0Desired,
+      );
       amount0 = amount0Desired;
       amount1 = ZERO;
     } else if (poolInfo.tickCurrent >= tickUpper) {
       // Position is below current price, only token1 needed
-      liquidity = this.getLiquidityFromAmount1(sqrtRatioA, sqrtRatioB, amount1Desired);
+      liquidity = this.getLiquidityFromAmount1(
+        sqrtRatioA,
+        sqrtRatioB,
+        amount1Desired,
+      );
       amount0 = ZERO;
       amount1 = amount1Desired;
     } else {
       // Position is active, both tokens needed
-      const liquidity0 = this.getLiquidityFromAmount0(sqrtRatioCurrent, sqrtRatioB, amount0Desired);
-      const liquidity1 = this.getLiquidityFromAmount1(sqrtRatioA, sqrtRatioCurrent, amount1Desired);
+      const liquidity0 = this.getLiquidityFromAmount0(
+        sqrtRatioCurrent,
+        sqrtRatioB,
+        amount0Desired,
+      );
+      const liquidity1 = this.getLiquidityFromAmount1(
+        sqrtRatioA,
+        sqrtRatioCurrent,
+        amount1Desired,
+      );
 
       liquidity = liquidity0.lt(liquidity1) ? liquidity0 : liquidity1;
 
-      amount0 = this.getAmount0FromLiquidity(sqrtRatioCurrent, sqrtRatioB, liquidity);
-      amount1 = this.getAmount1FromLiquidity(sqrtRatioA, sqrtRatioCurrent, liquidity);
+      amount0 = this.getAmount0FromLiquidity(
+        sqrtRatioCurrent,
+        sqrtRatioB,
+        liquidity,
+      );
+      amount1 = this.getAmount1FromLiquidity(
+        sqrtRatioA,
+        sqrtRatioCurrent,
+        liquidity,
+      );
     }
 
     return { liquidity, amount0, amount1 };
@@ -449,13 +529,21 @@ export class PoolUtils {
   private static getLiquidityFromAmount0(
     sqrtRatioAX64: BN,
     sqrtRatioBX64: BN,
-    amount0: BN
+    amount0: BN,
   ): BN {
     if (sqrtRatioAX64.gt(sqrtRatioBX64)) {
       [sqrtRatioAX64, sqrtRatioBX64] = [sqrtRatioBX64, sqrtRatioAX64];
     }
-    const intermediate = MathUtils.mulDivFloor(sqrtRatioAX64, sqrtRatioBX64, Q64);
-    return MathUtils.mulDivFloor(amount0, intermediate, sqrtRatioBX64.sub(sqrtRatioAX64));
+    const intermediate = MathUtils.mulDivFloor(
+      sqrtRatioAX64,
+      sqrtRatioBX64,
+      Q64,
+    );
+    return MathUtils.mulDivFloor(
+      amount0,
+      intermediate,
+      sqrtRatioBX64.sub(sqrtRatioAX64),
+    );
   }
 
   /**
@@ -468,12 +556,16 @@ export class PoolUtils {
   private static getLiquidityFromAmount1(
     sqrtRatioAX64: BN,
     sqrtRatioBX64: BN,
-    amount1: BN
+    amount1: BN,
   ): BN {
     if (sqrtRatioAX64.gt(sqrtRatioBX64)) {
       [sqrtRatioAX64, sqrtRatioBX64] = [sqrtRatioBX64, sqrtRatioAX64];
     }
-    return MathUtils.mulDivFloor(amount1, Q64, sqrtRatioBX64.sub(sqrtRatioAX64));
+    return MathUtils.mulDivFloor(
+      amount1,
+      Q64,
+      sqrtRatioBX64.sub(sqrtRatioAX64),
+    );
   }
 
   /**
@@ -483,10 +575,10 @@ export class PoolUtils {
    * @param liquidity - Liquidity amount
    * @returns Token0 amount
    */
-  private static getAmount0FromLiquidity(
+  public static getAmount0FromLiquidity(
     sqrtRatioAX64: BN,
     sqrtRatioBX64: BN,
-    liquidity: BN
+    liquidity: BN,
   ): BN {
     if (sqrtRatioAX64.gt(sqrtRatioBX64)) {
       [sqrtRatioAX64, sqrtRatioBX64] = [sqrtRatioBX64, sqrtRatioAX64];
@@ -494,7 +586,7 @@ export class PoolUtils {
     return MathUtils.mulDivFloor(
       MathUtils.mulDivFloor(liquidity, Q64, sqrtRatioAX64),
       sqrtRatioBX64.sub(sqrtRatioAX64),
-      sqrtRatioBX64
+      sqrtRatioBX64,
     );
   }
 
@@ -505,14 +597,18 @@ export class PoolUtils {
    * @param liquidity - Liquidity amount
    * @returns Token1 amount
    */
-  private static getAmount1FromLiquidity(
+  public static getAmount1FromLiquidity(
     sqrtRatioAX64: BN,
     sqrtRatioBX64: BN,
-    liquidity: BN
+    liquidity: BN,
   ): BN {
     if (sqrtRatioAX64.gt(sqrtRatioBX64)) {
       [sqrtRatioAX64, sqrtRatioBX64] = [sqrtRatioBX64, sqrtRatioAX64];
     }
-    return MathUtils.mulDivFloor(liquidity, sqrtRatioBX64.sub(sqrtRatioAX64), Q64);
+    return MathUtils.mulDivFloor(
+      liquidity,
+      sqrtRatioBX64.sub(sqrtRatioAX64),
+      Q64,
+    );
   }
 }

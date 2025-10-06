@@ -85,9 +85,6 @@ export const DEFAULT_CONFIG = {
 
 // Pool size constants
 export const TICKS_PER_ARRAY = 60;
-export const TICK_ARRAY_SIZE = 10240; // bytes
-export const POOL_STATE_SIZE = 1544; // bytes
-export const POSITION_SIZE = 281; // bytes
 
 // Price calculation constants
 export const PRICE_PRECISION = 1e6;

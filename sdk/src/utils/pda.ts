@@ -11,6 +11,7 @@ import {
   type ProgramDerivedAddress,
   address,
   getI32Encoder,
+  Endian,
 } from "@solana/kit";
 import {
   STABBLE_CLMM_PROGRAM_ID,
@@ -19,7 +20,7 @@ import {
 } from "../constants";
 
 const addressEncoder = getAddressEncoder();
-const i32Encoder = getI32Encoder();
+const i32Encoder = getI32Encoder({ endian: Endian.Big });
 
 export class PdaUtils {
   /**

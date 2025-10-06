@@ -1,23 +1,23 @@
-/**
- * Enhanced type definitions for the Stabble CLMM SDK
- * Builds upon the generated types with additional developer-friendly interfaces
- */
-
-import type { Address, Rpc, Instruction, TransactionSigner } from "@solana/kit";
 import type {
-  PoolState,
-  AmmConfig,
-  PersonalPositionState,
-  TickArrayState,
-} from "./generated";
+  Address,
+  Rpc,
+  Instruction,
+  TransactionSigner,
+  SolanaRpcApiDevnet,
+  SolanaRpcApiMainnet,
+  SolanaRpcApiTestnet,
+} from "@solana/kit";
+import type { PoolState, PersonalPositionState } from "./generated";
 import BN from "bn.js";
-import Decimal from "decimal.js";
 import { MAX_TICK, MIN_TICK } from "./constants";
+import { ClmmApiConfig } from "./api";
 
 // Core SDK Configuration
 export interface ClmmSdkConfig {
+  /** API client config */
+  apiConfig: ClmmApiConfig;
   /** RPC client for Solana network operations */
-  rpc: Rpc<any>;
+  rpc: Rpc<SolanaRpcApiMainnet | SolanaRpcApiDevnet | SolanaRpcApiTestnet>;
   /** Optional program address override */
   programAddress?: Address;
   /** Default commitment level for transactions */
@@ -96,28 +96,41 @@ export interface ClmmConfigInfo {
 
 // Position Management Types
 export interface PositionInfo extends PersonalPositionState {
-  /** Position value in USD */
-  valueUsd?: number;
-  /** Uncollected fees in token amounts */
-  unclaimedFees: {
-    token0: BN;
-    token1: BN;
-  };
-  /** Uncollected rewards */
-  unclaimedRewards: Array<{
-    mint: Address;
-    amount: BN;
-    symbol?: string;
-  }>;
-  /** Position age in seconds */
-  ageSeconds: number;
-  /** Whether position is in range */
-  inRange: boolean;
-  /** Price range bounds */
+  /** Token mint addresses from pool */
+  tokenMint0: Address;
+  tokenMint1: Address;
+
+  /** Computed token amounts based on liquidity and price range */
+  amount0: bigint;
+  amount1: bigint;
+
+  /** Price range bounds in human-readable format */
   priceRange: {
     lower: number;
     upper: number;
   };
+
+  /** Whether position is currently in range */
+  inRange: boolean;
+
+  /** Position age in seconds (from creation to now) */
+  ageSeconds: number;
+
+  /** Position value in USD (optional, requires price feeds) */
+  valueUsd?: number;
+
+  /** Uncollected fees mapped from PersonalPositionState for convenience */
+  unclaimedFees: {
+    token0: BN;
+    token1: BN;
+  };
+
+  /** Uncollected rewards (optional, if rewards are active) */
+  unclaimedRewards?: Array<{
+    mint: Address;
+    amount: BN;
+    symbol?: string;
+  }>;
 }
 
 // Trading Types
