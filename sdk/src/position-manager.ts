@@ -307,7 +307,7 @@ export class PositionManager {
    * @returns Instruction result following Raydium pattern
    */
   async makeIncreaseLiquidityV2Instructions(params: {
-    ownerPosition: Account<PersonalPositionState>;
+    ownerPosition: PersonalPositionState;
     poolState: Account<PoolState, Address>;
     ownerInfo: {
       wallet: TransactionSigner;
@@ -328,10 +328,10 @@ export class PositionManager {
     } = params;
 
     const [personalPosition] = await PdaUtils.getPositionStatePda(
-      ownerPosition.data.nftMint,
+      ownerPosition.nftMint,
     );
     const [positionNftAccount] = await findAssociatedTokenPda({
-      mint: ownerPosition.data.nftMint,
+      mint: ownerPosition.nftMint,
       owner: ownerInfo.wallet.address,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
     });
@@ -339,15 +339,15 @@ export class PositionManager {
     // Get protocol position
     const [protocolPositionPda] = await PdaUtils.getProtocolPositionStatePda(
       poolState.address,
-      ownerPosition.data.tickLowerIndex,
-      ownerPosition.data.tickUpperIndex,
+      ownerPosition.tickLowerIndex,
+      ownerPosition.tickUpperIndex,
     );
 
     // Get tick arrays for lower and upper ticks
     const [tickArrayLower] = await PdaUtils.getTickArrayStatePda(
       poolState.address,
       PdaUtils.getTickArrayStartIndex(
-        ownerPosition.data.tickLowerIndex,
+        ownerPosition.tickLowerIndex,
         poolState.data.tickSpacing,
       ),
     );
@@ -355,7 +355,7 @@ export class PositionManager {
     const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
       poolState.address,
       PdaUtils.getTickArrayStartIndex(
-        ownerPosition.data.tickUpperIndex,
+        ownerPosition.tickUpperIndex,
         poolState.data.tickSpacing,
       ),
     );
@@ -378,7 +378,7 @@ export class PositionManager {
       liquidity,
       amount0Max: amountMaxA,
       amount1Max: amountMaxB,
-      baseFlag: null, // Optional field - using null for now
+      baseFlag: null,
     });
 
     return {
@@ -402,7 +402,7 @@ export class PositionManager {
    * @returns Instruction result following Raydium pattern
    */
   async makeDecreaseLiquidityV2Instructions(params: {
-    ownerPosition: Account<PersonalPositionState>;
+    ownerPosition: PersonalPositionState;
     poolState: Account<PoolState, Address>;
     ownerInfo: {
       wallet: TransactionSigner;
@@ -423,10 +423,10 @@ export class PositionManager {
     } = params;
 
     const [personalPosition] = await PdaUtils.getPositionStatePda(
-      ownerPosition.data.nftMint,
+      ownerPosition.nftMint,
     );
     const [positionNftAccount] = await findAssociatedTokenPda({
-      mint: ownerPosition.data.nftMint,
+      mint: ownerPosition.nftMint,
       owner: ownerInfo.wallet.address,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
     });
@@ -434,15 +434,15 @@ export class PositionManager {
     // Get protocol position
     const [protocolPositionPda] = await PdaUtils.getProtocolPositionStatePda(
       poolState.address,
-      ownerPosition.data.tickLowerIndex,
-      ownerPosition.data.tickUpperIndex,
+      ownerPosition.tickLowerIndex,
+      ownerPosition.tickUpperIndex,
     );
 
     // Get tick arrays for lower and upper ticks
     const [tickArrayLower] = await PdaUtils.getTickArrayStatePda(
       poolState.address,
       PdaUtils.getTickArrayStartIndex(
-        ownerPosition.data.tickLowerIndex,
+        ownerPosition.tickLowerIndex,
         poolState.data.tickSpacing,
       ),
     );
@@ -450,7 +450,7 @@ export class PositionManager {
     const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
       poolState.address,
       PdaUtils.getTickArrayStartIndex(
-        ownerPosition.data.tickUpperIndex,
+        ownerPosition.tickUpperIndex,
         poolState.data.tickSpacing,
       ),
     );
@@ -496,7 +496,7 @@ export class PositionManager {
    * @returns Instruction result following established pattern
    */
   async makeClosePositionInstructions(params: {
-    ownerPosition: Account<PersonalPositionState>;
+    ownerPosition: PersonalPositionState;
     ownerInfo: {
       wallet: TransactionSigner;
     };
@@ -504,17 +504,17 @@ export class PositionManager {
     const { ownerPosition, ownerInfo } = params;
 
     const [personalPosition] = await PdaUtils.getPositionStatePda(
-      ownerPosition.data.nftMint,
+      ownerPosition.nftMint,
     );
     const [positionNftAccount] = await findAssociatedTokenPda({
-      mint: ownerPosition.data.nftMint,
+      mint: ownerPosition.nftMint,
       owner: ownerInfo.wallet.address,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
     });
 
     const instruction = getClosePositionInstruction({
       nftOwner: ownerInfo.wallet,
-      positionNftMint: ownerPosition.data.nftMint,
+      positionNftMint: ownerPosition.nftMint,
       positionNftAccount,
       personalPosition,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
