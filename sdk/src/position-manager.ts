@@ -1,35 +1,22 @@
-import {
-  Account,
-  generateKeyPairSigner,
-  type Address,
-  type TransactionSigner,
-} from "@solana/kit";
+import {Account, type Address, generateKeyPairSigner, type TransactionSigner,} from "@solana/kit";
 
 import {
-  getOpenPositionV2InstructionAsync,
-  getIncreaseLiquidityV2Instruction,
-  getDecreaseLiquidityV2Instruction,
-  getClosePositionInstruction,
   fetchMaybePersonalPositionState,
   fetchMaybePoolState,
+  getClosePositionInstruction,
+  getDecreaseLiquidityV2Instruction,
+  getIncreaseLiquidityV2Instruction,
+  getOpenPositionWithToken22NftInstructionAsync,
   PersonalPositionState,
   PoolState,
 } from "./generated";
 
-import type {
-  ClmmSdkConfig,
-  PositionInfo,
-  MakeInstructionResult,
-} from "./types";
-
-import { ClmmError, ClmmErrorCode } from "./types";
-import { PdaUtils, getMetadataPda } from "./utils/pda";
-import {
-  TOKEN_PROGRAM_ADDRESS,
-  findAssociatedTokenPda,
-} from "@solana-program/token";
-import { TickUtils, PoolUtils, SqrtPriceMath } from "./utils";
-import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import type {ClmmSdkConfig, MakeInstructionResult, PositionInfo,} from "./types";
+import {ClmmError, ClmmErrorCode} from "./types";
+import {getMetadataPda, PdaUtils} from "./utils/pda";
+import {findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS,} from "@solana-program/token";
+import {PoolUtils, SqrtPriceMath, TickUtils} from "./utils";
+import {TOKEN_2022_PROGRAM_ADDRESS} from "@solana-program/token-2022";
 import BN from "bn.js";
 
 export class PositionManager {
@@ -121,12 +108,11 @@ export class PositionManager {
       tickUpper,
     );
 
-    const instruction = await getOpenPositionV2InstructionAsync({
+    const instruction = await getOpenPositionWithToken22NftInstructionAsync({
       payer: ownerInfo.feePayer,
       positionNftOwner: ownerInfo.wallet,
       positionNftMint: nftMintAccount,
       positionNftAccount: positionNftAccountPda,
-      metadataAccount: metadataPda,
       poolState: poolAccount.address,
       protocolPosition: protocolPositionPda,
       tokenAccount0: ownerInfo.tokenAccountA,
@@ -260,12 +246,11 @@ export class PositionManager {
     const amount0Max = base === "MintA" ? baseAmount : otherAmountMax;
     const amount1Max = base === "MintA" ? otherAmountMax : baseAmount;
 
-    const instruction = await getOpenPositionV2InstructionAsync({
+    const instruction = await getOpenPositionWithToken22NftInstructionAsync({
       payer: ownerInfo.wallet,
       positionNftOwner: ownerInfo.wallet.address,
       positionNftMint: nftMintAccount,
       positionNftAccount: positionNftAccountPda,
-      metadataAccount: metadataPda,
       poolState: poolAccount.address,
       protocolPosition: protocolPositionPda,
       tokenAccount0: ownerInfo.tokenAccountA,
