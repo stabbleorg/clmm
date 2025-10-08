@@ -10,8 +10,19 @@ export * from "./pool";
 
 // Additional utility functions that don't warrant separate modules
 
-import { address, getAddressEncoder, SignatureBytes, TransactionSendingSigner, type Address } from "@solana/kit";
+import {
+  address,
+  getAddressEncoder,
+  Rpc,
+  SignatureBytes,
+  SolanaRpcApiDevnet,
+  SolanaRpcApiMainnet,
+  SolanaRpcApiTestnet,
+  TransactionSendingSigner,
+  type Address,
+} from "@solana/kit";
 import { ClmmError, ClmmErrorCode } from "../types";
+import { API_ENDPONTS } from "../constants";
 
 /**
  * Validate that an address is not empty
@@ -179,10 +190,22 @@ export function getFakeSigner(address: Address) {
   return {
     address,
     signAndSendTransactions: async (transactions, _config) => {
-      return transactions.map(() =>
-        new Uint8Array(64).fill(0) as SignatureBytes
+      return transactions.map(
+        () => new Uint8Array(64).fill(0) as SignatureBytes,
       );
-    }
+    },
   } satisfies TransactionSendingSigner;
+}
 
+/**
+ * A very brutal way to differentate between mainnet and devnet RPC
+ */
+export function getApisFromEndpoint(
+  rpc: Rpc<SolanaRpcApiMainnet | SolanaRpcApiDevnet | SolanaRpcApiTestnet>,
+) {
+  if ("requestAirdrop" in rpc) {
+    return API_ENDPONTS.devnet;
+  }
+
+  return API_ENDPONTS.mainnet;
 }

@@ -1,15 +1,10 @@
 import axios, { AxiosInstance, AxiosError } from "axios";
-import { Address } from "@solana/kit";
-import { PoolApiData } from "../types";
+import { ClmmConfig } from "../types";
 import { ClmmApiConfig } from ".";
 
-interface ApiPoolResponse {
-  pool: PoolApiData;
-}
+type ApiClmmConfigResponse = ClmmConfig[];
 
-type ApiPoolsResponse = PoolApiData[];
-
-export class PoolsApi {
+export class ClmmConfigApi {
   private readonly client: AxiosInstance;
 
   constructor(private readonly config: ClmmApiConfig) {
@@ -23,57 +18,17 @@ export class PoolsApi {
   }
 
   /**
-   * Fetch a single pool by address
-   * @param poolAddress - Pool state address
-   * @returns Pool information or null if not found
+   * Fetch all configs
+   * @returns CLMM config information or null if not found
    */
-  async getPool(poolAddress: Address): Promise<PoolApiData | null> {
+  async getClmmConfigs(): Promise<ClmmConfig[] | null> {
     try {
-      const response = await this.client.get<ApiPoolResponse>(
-        `/pools/${poolAddress}`,
-      );
+      const response =
+        await this.client.get<ApiClmmConfigResponse>("/clmm-configs");
 
-      return response.data.pool;
+      return response.data;
     } catch (error) {
       if (this.isNotFoundError(error)) return null;
-      throw this.handleApiError(error);
-    }
-  }
-
-  /**
-   * Fetch all pools
-   * @returns Array of pool information
-   */
-  async getAllPools(): Promise<PoolApiData[]> {
-    try {
-      const response = await this.client.get<ApiPoolsResponse>("/pools");
-      return response.data;
-    } catch (error) {
-      throw this.handleApiError(error);
-    }
-  }
-
-  /**
-   * Fetch pools by token pair
-   * @param tokenA - First token mint
-   * @param tokenB - Second token mint
-   * @returns Array of pool information matching the token pair
-   */
-  async getPoolsByTokenPair(
-    tokenA: Address,
-    tokenB: Address,
-  ): Promise<PoolApiData[]> {
-    try {
-      const response = await this.client.get<ApiPoolsResponse>("/pools", {
-        params: {
-          tokenA,
-          tokenB,
-        },
-      });
-
-      return response.data;
-    } catch (error) {
-      if (this.isNotFoundError(error)) return [];
       throw this.handleApiError(error);
     }
   }
@@ -97,7 +52,7 @@ export class PoolsApi {
           (axiosError.response.data as any)?.message || axiosError.message;
 
         if (status === 404) {
-          return new Error(`Pool not found: ${message}`);
+          return new Error(`CLMM config not found: ${message}`);
         }
 
         if (status >= 500) {

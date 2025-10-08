@@ -3,6 +3,7 @@ import { Clmm } from "./clmm";
 import { PoolManager } from "./pool-manager";
 import { PositionManager } from "./position-manager";
 import { ClmmApi } from "./api";
+import { getApisFromEndpoint } from "./utils";
 // import { SwapManager } from './swap';
 // import { RewardsManager } from './rewards';
 
@@ -31,7 +32,13 @@ export class ClmmSdk {
   constructor(config: ClmmSdkConfig) {
     this.config = config;
     this.clmm = new Clmm(config);
-    this.api = new ClmmApi(config.apiConfig);
+
+    // API config
+    const baseUrl = getApisFromEndpoint(config.rpc);
+    const apiConfig = config.apiConfig ? config.apiConfig : { baseUrl };
+
+    this.api = new ClmmApi(apiConfig);
+
     this.pools = new PoolManager(config);
     this.positions = new PositionManager(config);
     // this.swap = new SwapManager(config);

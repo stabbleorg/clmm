@@ -2,8 +2,9 @@
  * Constants and configuration values for the Stabble CLMM SDK
  */
 
-import type { Address } from "@solana/kit";
+import { mainnet, type Address } from "@solana/kit";
 import BN from "bn.js";
+import { fetchAllAmmConfig } from "./generated";
 
 // Program addresses
 export const STABBLE_CLMM_PROGRAM_ID =
@@ -86,81 +87,6 @@ export const DEFAULT_CONFIG = {
 // Pool size constants
 export const TICKS_PER_ARRAY = 60;
 
-// Price calculation constants
-export const PRICE_PRECISION = 1e6;
-export const LIQUIDITY_PRECISION = 1e12;
-export const FEE_PRECISION = 1e6;
-
-// Gas and transaction limits
-export const DEFAULT_COMPUTE_UNITS = 400_000;
-export const PRIORITY_FEE_MICRO_LAMPORTS = 1000;
-
-// Common token addresses (mainnet)
-export const WELL_KNOWN_TOKENS = {
-  SOL: "So11111111111111111111111111111111111111112" as Address,
-  USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" as Address,
-  USDT: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" as Address,
-  // Add more as needed
-} as const;
-
-// Error codes mapping to human-readable messages
-export const ERROR_MESSAGES = {
-  6000: "LOK error",
-  6001: "Not approved",
-  6002: "Invalid update config flag",
-  6003: "Account lack",
-  6004: "Must collect fees and rewards before closing position",
-  6005: "Minting amount should be greater than 0",
-  6006: "Tick out of range",
-  6007: "Lower tick must be below upper tick",
-  6008: "Tick must be >= minimum tick (-443636)",
-  6009: "Tick must be <= maximum tick (443636)",
-  6010: "Tick must be divisible by tick spacing",
-  6011: "Invalid tick array account",
-  6012: "Invalid tick array boundary",
-  6013: "Square root price limit overflow",
-  6014: "sqrt_price_x64 out of range",
-  6015: "Liquidity sub delta L must be smaller than before",
-  6016: "Liquidity add delta L must be >= before",
-  6017: "Invalid liquidity when updating position",
-  6018: "Both token amounts must not be zero while supplying liquidity",
-  6019: "Liquidity insufficient",
-  6020: "Transaction too old",
-  6021: "Price slippage check failed",
-  6022: "Too little output received",
-  6023: "Too much input paid",
-  6024: "Swap amount cannot be zero",
-  6025: "Input pool vault is invalid",
-  6026: "Swap input or output amount is too small",
-  6027: "Not enough tick array accounts",
-  6028: "Invalid first tick array account",
-  6029: "Invalid reward index",
-  6030: "Reward token limit reached",
-  6031: "Reward token already in use",
-  6032: "Reward tokens must contain one of pool vault mints",
-  6033: "Invalid reward init param",
-  6034: "Invalid collect reward desired amount",
-  6035: "Invalid collect reward input account number",
-  6036: "Invalid reward period",
-  6037: "Reward emissions modification only allowed within 72 hours of cycle end",
-  6038: "Uninitialized reward info",
-  6039: "Token2022 mint extension not supported",
-  6040: "Missing tick array bitmap extension account",
-  6041: "Insufficient liquidity for this direction",
-  6042: "Max token overflow",
-  6043: "Calculate overflow",
-  6044: "Transfer fee calculation mismatch",
-} as const;
-
-// Account discriminators (from generated code)
-export const DISCRIMINATORS = {
-  POOL_STATE: new Uint8Array([247, 237, 227, 245, 215, 195, 222, 70]),
-  AMM_CONFIG: new Uint8Array([218, 244, 33, 104, 203, 203, 43, 111]),
-  POSITION_STATE: new Uint8Array([70, 111, 150, 126, 230, 15, 25, 117]),
-  TICK_ARRAY_STATE: new Uint8Array([192, 155, 85, 205, 49, 249, 129, 42]),
-  OBSERVATION_STATE: new Uint8Array([122, 174, 197, 53, 129, 9, 165, 132]),
-} as const;
-
 // PDA seeds
 export const PDA_SEEDS = {
   AMM_CONFIG: "amm_config",
@@ -173,3 +99,15 @@ export const PDA_SEEDS = {
   OPERATION: "operation",
   BITMAP_EXTENSION: "pool_tick_array_bitmap_extension",
 } as const;
+
+/*
+ * API Endpoints
+ */
+
+const STABBLE_CLMM_API_DEVNET = "https://dev-mclmm-api.stabble.org";
+const STABBLE_CLMM_API_MAINNET = "https://mclmm-api.stabble.org";
+
+export const API_ENDPONTS = {
+  mainnet: STABBLE_CLMM_API_MAINNET,
+  devnet: STABBLE_CLMM_API_DEVNET,
+};

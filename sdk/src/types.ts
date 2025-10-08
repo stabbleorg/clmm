@@ -14,27 +14,14 @@ import { ClmmApiConfig } from "./api";
 
 // Core SDK Configuration
 export interface ClmmSdkConfig {
-  /** API client config */
-  apiConfig: ClmmApiConfig;
   /** RPC client for Solana network operations */
   rpc: Rpc<SolanaRpcApiMainnet | SolanaRpcApiDevnet | SolanaRpcApiTestnet>;
+  /** API client config */
+  apiConfig?: ClmmApiConfig;
   /** Optional program address override */
   programAddress?: Address;
   /** Default commitment level for transactions */
   commitment?: "processed" | "confirmed" | "finalized";
-}
-
-// clmm config
-export interface ClmmConfig {
-  id: string;
-  index: number;
-  protocolFeeRate: number;
-  tradeFeeRate: number;
-  tickSpacing: number;
-  fundFeeRate: number;
-  description: string;
-  defaultRange: number;
-  defaultRangePoint: number[];
 }
 
 // Instruction Builder Result Type
@@ -70,6 +57,22 @@ export interface PoolInfo extends PoolState {
   apy?: number;
 }
 
+/**
+ * Position Data API response
+ */
+export type PoolApiData = {
+  tokenVault1: string;
+  tokenVault0: string;
+  ammConfig: string;
+  sqrtPriceX64: string;
+  tickSpacing: number;
+  tokenMint0: string;
+  tokenMint1: string;
+  owner: string;
+  tick: number;
+  address: string;
+};
+
 export interface TokenInfo {
   /** Token mint address */
   mint: Address;
@@ -83,15 +86,15 @@ export interface TokenInfo {
   logoUri?: string;
 }
 
-export interface ClmmConfigInfo {
-  id: Address;
-  index: number;
-  protocolFeeRate: number;
+export interface ClmmConfig {
   tradeFeeRate: number;
-  tickSpacing: number;
+  index: number;
   fundFeeRate: number;
+  tickSpacing: number;
   fundOwner: string;
-  description: string;
+  owner: string;
+  address: string;
+  protocolFeeRate: number;
 }
 
 // Position Management Types
