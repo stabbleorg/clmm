@@ -1,7 +1,7 @@
 {
-  "name": "@stabbleorg/clmm-sdk",
+  "name": "@stabbleorg/mclmm-sdk",
   "version": "0.1.0",
-  "description": "SDK for Stabble CLMM Program",
+  "description": "SDK for Stabble's margin-enabled concentrated liquidity market maker",
   "main": "lib/index.js",
   "module": "lib/index.mjs",
   "types": "lib/index.d.ts",
@@ -16,6 +16,14 @@
   },
   "license": "MIT",
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "lib",
+    "idl",
+    "README.md"
+  ],
   "scripts": {
     "build:js": "tsup src/index.ts --format esm,cjs --outDir lib",
     "build:types": "tsc --emitDeclarationOnly",

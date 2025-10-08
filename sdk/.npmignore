@@ -1,0 +1,34 @@
+# Source files
+src/
+scripts/
+
+# Development files
+tsconfig.json
+*.tsbuildinfo
+
+# Node modules
+node_modules/
+
+# Documentation
+*.md
+!README.md
+
+# IDE
+.vscode/
+.idea/
+
+# Tests
+tests/
+__tests__/
+*.test.ts
+*.spec.ts
+
+# Build artifacts
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
