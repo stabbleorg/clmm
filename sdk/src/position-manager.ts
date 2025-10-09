@@ -13,9 +13,8 @@ import {
 
 import type {ClmmSdkConfig, MakeInstructionResult, PositionInfo,} from "./types";
 import {ClmmError, ClmmErrorCode} from "./types";
-import {getMetadataPda, PdaUtils} from "./utils/pda";
-import {findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS,} from "@solana-program/token";
-import {PoolUtils, SqrtPriceMath, TickUtils} from "./utils";
+import {findAssociatedTokenPda} from "@solana-program/token";
+import {PoolUtils, SqrtPriceMath, TickUtils, getMetadataPda, PdaUtils} from "./utils";
 import {TOKEN_2022_PROGRAM_ADDRESS} from "@solana-program/token-2022";
 import BN from "bn.js";
 
@@ -98,7 +97,7 @@ export class PositionManager {
     const [positionNftAccountPda] = await findAssociatedTokenPda({
       mint: nftMintAccount.address,
       owner: ownerInfo.wallet,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
     // Get protocol position
@@ -232,7 +231,7 @@ export class PositionManager {
     const [positionNftAccountPda] = await findAssociatedTokenPda({
       mint: nftMintAccount.address,
       owner: ownerInfo.wallet.address,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
     // Get protocol position
@@ -318,7 +317,7 @@ export class PositionManager {
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.nftMint,
       owner: ownerInfo.wallet.address,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
     // Get protocol position
@@ -357,7 +356,7 @@ export class PositionManager {
       tokenAccount1: ownerInfo.tokenAccountB,
       tokenVault0: poolState.data.tokenVault0,
       tokenVault1: poolState.data.tokenVault1,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       vault0Mint: poolState.data.tokenMint0,
       vault1Mint: poolState.data.tokenMint1,
       liquidity,
@@ -413,7 +412,7 @@ export class PositionManager {
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.nftMint,
       owner: ownerInfo.wallet.address,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
     // Get protocol position
@@ -452,7 +451,7 @@ export class PositionManager {
       tickArrayUpper,
       recipientTokenAccount0: ownerInfo.tokenAccountA,
       recipientTokenAccount1: ownerInfo.tokenAccountB,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       vault0Mint: poolState.data.tokenMint0,
       vault1Mint: poolState.data.tokenMint1,
       liquidity,
@@ -494,7 +493,7 @@ export class PositionManager {
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.nftMint,
       owner: ownerInfo.wallet.address,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
     const instruction = getClosePositionInstruction({
@@ -502,7 +501,7 @@ export class PositionManager {
       positionNftMint: ownerPosition.nftMint,
       positionNftAccount,
       personalPosition,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
     return {
@@ -657,7 +656,7 @@ export class PositionManager {
       const response = await this.config.rpc
         .getTokenAccountsByOwner(
           wallet,
-          { programId: TOKEN_PROGRAM_ADDRESS },
+          { programId: TOKEN_2022_PROGRAM_ADDRESS },
           { encoding: "jsonParsed" },
         )
         .send();
