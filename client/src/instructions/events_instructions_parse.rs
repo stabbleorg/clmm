@@ -564,64 +564,6 @@ pub fn handle_program_instruction(
             }
             println!("{:#?}", CollectFundFee::from(ix));
         }
-        instruction::OpenPosition::DISCRIMINATOR => {
-            let ix = decode_instruction::<instruction::OpenPosition>(&mut ix_data).unwrap();
-            #[derive(Debug)]
-            pub struct OpenPosition {
-                pub tick_lower_index: i32,
-                pub tick_upper_index: i32,
-                pub tick_array_lower_start_index: i32,
-                pub tick_array_upper_start_index: i32,
-                pub liquidity: u128,
-                pub amount_0_max: u64,
-                pub amount_1_max: u64,
-            }
-            impl From<instruction::OpenPosition> for OpenPosition {
-                fn from(instr: instruction::OpenPosition) -> OpenPosition {
-                    OpenPosition {
-                        tick_lower_index: instr.tick_lower_index,
-                        tick_upper_index: instr.tick_upper_index,
-                        tick_array_lower_start_index: instr.tick_array_lower_start_index,
-                        tick_array_upper_start_index: instr.tick_array_upper_start_index,
-                        liquidity: instr.liquidity,
-                        amount_0_max: instr.amount_0_max,
-                        amount_1_max: instr.amount_1_max,
-                    }
-                }
-            }
-            println!("{:#?}", OpenPosition::from(ix));
-        }
-        instruction::OpenPositionV2::DISCRIMINATOR => {
-            let ix = decode_instruction::<instruction::OpenPositionV2>(&mut ix_data).unwrap();
-            #[derive(Debug)]
-            pub struct OpenPositionV2 {
-                pub tick_lower_index: i32,
-                pub tick_upper_index: i32,
-                pub tick_array_lower_start_index: i32,
-                pub tick_array_upper_start_index: i32,
-                pub liquidity: u128,
-                pub amount_0_max: u64,
-                pub amount_1_max: u64,
-                pub base_flag: Option<bool>,
-                pub with_metadata: bool,
-            }
-            impl From<instruction::OpenPositionV2> for OpenPositionV2 {
-                fn from(instr: instruction::OpenPositionV2) -> OpenPositionV2 {
-                    OpenPositionV2 {
-                        tick_lower_index: instr.tick_lower_index,
-                        tick_upper_index: instr.tick_upper_index,
-                        tick_array_lower_start_index: instr.tick_array_lower_start_index,
-                        tick_array_upper_start_index: instr.tick_array_upper_start_index,
-                        liquidity: instr.liquidity,
-                        amount_0_max: instr.amount_0_max,
-                        amount_1_max: instr.amount_1_max,
-                        base_flag: instr.base_flag,
-                        with_metadata: instr.with_metadata,
-                    }
-                }
-            }
-            println!("{:#?}", OpenPositionV2::from(ix));
-        }
         instruction::ClosePosition::DISCRIMINATOR => {
             let ix = decode_instruction::<instruction::ClosePosition>(&mut ix_data).unwrap();
             #[derive(Debug)]
@@ -632,25 +574,6 @@ pub fn handle_program_instruction(
                 }
             }
             println!("{:#?}", ClosePosition::from(ix));
-        }
-        instruction::IncreaseLiquidity::DISCRIMINATOR => {
-            let ix = decode_instruction::<instruction::IncreaseLiquidity>(&mut ix_data).unwrap();
-            #[derive(Debug)]
-            pub struct IncreaseLiquidity {
-                pub liquidity: u128,
-                pub amount_0_max: u64,
-                pub amount_1_max: u64,
-            }
-            impl From<instruction::IncreaseLiquidity> for IncreaseLiquidity {
-                fn from(instr: instruction::IncreaseLiquidity) -> IncreaseLiquidity {
-                    IncreaseLiquidity {
-                        liquidity: instr.liquidity,
-                        amount_0_max: instr.amount_0_max,
-                        amount_1_max: instr.amount_1_max,
-                    }
-                }
-            }
-            println!("{:#?}", IncreaseLiquidity::from(ix));
         }
         instruction::IncreaseLiquidityV2::DISCRIMINATOR => {
             let ix = decode_instruction::<instruction::IncreaseLiquidityV2>(&mut ix_data).unwrap();
@@ -673,25 +596,6 @@ pub fn handle_program_instruction(
             }
             println!("{:#?}", IncreaseLiquidityV2::from(ix));
         }
-        instruction::DecreaseLiquidity::DISCRIMINATOR => {
-            let ix = decode_instruction::<instruction::DecreaseLiquidity>(&mut ix_data).unwrap();
-            #[derive(Debug)]
-            pub struct DecreaseLiquidity {
-                pub liquidity: u128,
-                pub amount_0_min: u64,
-                pub amount_1_min: u64,
-            }
-            impl From<instruction::DecreaseLiquidity> for DecreaseLiquidity {
-                fn from(instr: instruction::DecreaseLiquidity) -> DecreaseLiquidity {
-                    DecreaseLiquidity {
-                        liquidity: instr.liquidity,
-                        amount_0_min: instr.amount_0_min,
-                        amount_1_min: instr.amount_1_min,
-                    }
-                }
-            }
-            println!("{:#?}", DecreaseLiquidity::from(ix));
-        }
         instruction::DecreaseLiquidityV2::DISCRIMINATOR => {
             let ix = decode_instruction::<instruction::DecreaseLiquidityV2>(&mut ix_data).unwrap();
             #[derive(Debug)]
@@ -710,27 +614,6 @@ pub fn handle_program_instruction(
                 }
             }
             println!("{:#?}", DecreaseLiquidityV2::from(ix));
-        }
-        instruction::Swap::DISCRIMINATOR => {
-            let ix = decode_instruction::<instruction::Swap>(&mut ix_data).unwrap();
-            #[derive(Debug)]
-            pub struct Swap {
-                pub amount: u64,
-                pub other_amount_threshold: u64,
-                pub sqrt_price_limit_x64: u128,
-                pub is_base_input: bool,
-            }
-            impl From<instruction::Swap> for Swap {
-                fn from(instr: instruction::Swap) -> Swap {
-                    Swap {
-                        amount: instr.amount,
-                        other_amount_threshold: instr.other_amount_threshold,
-                        sqrt_price_limit_x64: instr.sqrt_price_limit_x64,
-                        is_base_input: instr.is_base_input,
-                    }
-                }
-            }
-            println!("{:#?}", Swap::from(ix));
         }
         instruction::SwapV2::DISCRIMINATOR => {
             let ix = decode_instruction::<instruction::SwapV2>(&mut ix_data).unwrap();
