@@ -607,7 +607,7 @@ fn get_metadata_data(personal_position_id: Pubkey) -> (String, String, String) {
         String::from("Stabble Concentrated Liquidity"),
         String::from("SCL"),
         format!(
-            "https://dev-positions.stabble.org/{}",
+            "https://dev-positions.stabble.org/{}.json",
             personal_position_id.to_string()
         )
     );
@@ -616,7 +616,7 @@ fn get_metadata_data(personal_position_id: Pubkey) -> (String, String, String) {
         String::from("Stabble Concentrated Liquidity"),
         String::from("SCL"),
         format!(
-            "https://positions.stabble.org/{}",
+            "https://positions.stabble.org/{}.json",
             personal_position_id.to_string()
         )
     );
