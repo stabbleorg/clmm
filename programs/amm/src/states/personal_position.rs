@@ -213,6 +213,12 @@ pub struct CreatePersonalPositionEvent {
     /// The pool for which liquidity was added
     pub pool_state: Pubkey,
 
+    /// The personal position
+    pub personal_position: Pubkey,
+
+    /// The nft mint address for the position
+    pub nft_mint: Pubkey,
+
     /// The address that create the position
     pub minter: Pubkey,
 
