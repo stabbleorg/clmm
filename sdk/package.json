@@ -1,0 +1,59 @@
+{
+  "name": "@stabbleorg/mclmm-sdk",
+  "version": "0.1.4",
+  "description": "SDK for Stabble's margin-enabled concentrated liquidity market maker",
+  "main": "lib/index.js",
+  "module": "lib/index.mjs",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "require": "./lib/index.js",
+      "import": "./lib/index.mjs",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "license": "MIT",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "lib",
+    "idl",
+    "README.md"
+  ],
+  "scripts": {
+    "build:js": "tsup src/index.ts --format esm,cjs --outDir lib",
+    "build:types": "tsc --emitDeclarationOnly",
+    "build": "yarn build:js && yarn build:types",
+    "generate-clients": "ts-node ./scripts/generate-clients.ts",
+    "ts": "tsc --noEmit",
+    "prepare:canary": "yarn build && npm version --prerelease --preid=canary"
+  },
+  "dependencies": {
+    "@codama/nodes-from-anchor": "^1.2.9",
+    "@codama/renderers-js": "^1.4.2",
+    "@solana-program/token": "^0.6.0",
+    "@solana-program/token-2022": "^0.5.0",
+    "@solana/kit": "^3.0.3",
+    "@solana/web3.js": "^1.98.4",
+    "@types/bn.js": "^5.2.0",
+    "assert": "^2.0.0",
+    "axios": "^1.12.2",
+    "bn.js": "^5.2.2",
+    "buffer": "6.0.3",
+    "codama": "^1.3.7",
+    "decimal.js": "^10.6.0",
+    "invariant": "2.2.4"
+  },
+  "devDependencies": {
+    "@types/invariant": "2.2.35",
+    "@types/node": "^24.5.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.0.2",
+    "typedoc": "^0.25.7",
+    "typescript": "*"
+  }
+}
