@@ -602,13 +602,23 @@ fn mint_nft_and_remove_mint_authority<'info>(
 }
 
 fn get_metadata_data(personal_position_id: Pubkey) -> (String, String, String) {
+    #[cfg(feature = "devnet")]
     return (
-        String::from("Raydium Concentrated Liquidity"),
-        String::from("RCL"),
+        String::from("Stabble Concentrated Liquidity"),
+        String::from("SCL"),
         format!(
-            "https://dynamic-ipfs.raydium.io/clmm/position?id={}",
+            "https://dev-positions.stabble.org/{}.json",
             personal_position_id.to_string()
-        ),
+        )
+    );
+    #[cfg(not(feature = "devnet"))]
+    return (
+        String::from("Stabble Concentrated Liquidity"),
+        String::from("SCL"),
+        format!(
+            "https://positions.stabble.org/{}.json",
+            personal_position_id.to_string()
+        )
     );
 }
 
