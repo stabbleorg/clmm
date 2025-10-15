@@ -20,16 +20,9 @@ solana_security_txt::security_txt! {
     auditors: "https://github.com/raydium-io/raydium-docs/blob/master/audit/OtterSec%20Q3%202022/Raydium%20concentrated%20liquidity%20(CLMM)%20program.pdf"
 }
 
-#[cfg(feature = "devnet")]
 declare_id!("6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6");
-#[cfg(not(feature = "devnet"))]
-declare_id!("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
-
 pub mod admin {
     use super::{pubkey, Pubkey};
-    #[cfg(feature = "devnet")]
-    pub const ID: Pubkey = pubkey!("AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw");
-    #[cfg(not(feature = "devnet"))]
     pub const ID: Pubkey = pubkey!("AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw");
 }
 
