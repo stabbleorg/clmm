@@ -37,7 +37,7 @@ const MINT_WHITELIST: [&'static str; 6] = [
 
 pub mod superstate_allowlist {
     use super::{pubkey, Pubkey};
-    pub const ID: Pubkey = pubkey!("AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw");
+    pub const ID: Pubkey = pubkey!("3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2");
 }
 
 pub fn invoke_memo_instruction<'info>(

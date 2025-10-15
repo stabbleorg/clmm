@@ -23,7 +23,7 @@ solana_security_txt::security_txt! {
 declare_id!("6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6");
 pub mod admin {
     use super::{pubkey, Pubkey};
-    pub const ID: Pubkey = pubkey!("AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw");
+    pub const ID: Pubkey = pubkey!("3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2");
 }
 
 #[program]
