@@ -71,6 +71,7 @@ export type PoolApiData = {
   owner: string;
   tick: number;
   address: string;
+  tvl: string;
 };
 
 export interface TokenInfo {
