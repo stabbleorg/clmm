@@ -23,16 +23,11 @@ import {
   type ParsedCreateOperationAccountInstruction,
   type ParsedCreatePoolInstruction,
   type ParsedCreateSupportMintAssociatedInstruction,
-  type ParsedDecreaseLiquidityInstruction,
   type ParsedDecreaseLiquidityV2Instruction,
-  type ParsedIncreaseLiquidityInstruction,
   type ParsedIncreaseLiquidityV2Instruction,
   type ParsedInitializeRewardInstruction,
-  type ParsedOpenPositionInstruction,
-  type ParsedOpenPositionV2Instruction,
   type ParsedOpenPositionWithToken22NftInstruction,
   type ParsedSetRewardParamsInstruction,
-  type ParsedSwapInstruction,
   type ParsedSwapRouterBaseInInstruction,
   type ParsedSwapV2Instruction,
   type ParsedTransferRewardOwnerInstruction,
@@ -175,16 +170,11 @@ export enum AmmV3Instruction {
   CreateOperationAccount,
   CreatePool,
   CreateSupportMintAssociated,
-  DecreaseLiquidity,
   DecreaseLiquidityV2,
-  IncreaseLiquidity,
   IncreaseLiquidityV2,
   InitializeReward,
-  OpenPosition,
-  OpenPositionV2,
   OpenPositionWithToken22Nft,
   SetRewardParams,
-  Swap,
   SwapRouterBaseIn,
   SwapV2,
   TransferRewardOwner,
@@ -301,34 +291,12 @@ export function identifyAmmV3Instruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([160, 38, 208, 111, 104, 91, 44, 1])
-      ),
-      0
-    )
-  ) {
-    return AmmV3Instruction.DecreaseLiquidity;
-  }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([58, 127, 188, 62, 79, 82, 196, 96])
       ),
       0
     )
   ) {
     return AmmV3Instruction.DecreaseLiquidityV2;
-  }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([46, 156, 243, 118, 13, 205, 251, 178])
-      ),
-      0
-    )
-  ) {
-    return AmmV3Instruction.IncreaseLiquidity;
   }
   if (
     containsBytes(
@@ -356,28 +324,6 @@ export function identifyAmmV3Instruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([135, 128, 47, 77, 15, 152, 240, 49])
-      ),
-      0
-    )
-  ) {
-    return AmmV3Instruction.OpenPosition;
-  }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([77, 184, 74, 214, 112, 86, 241, 199])
-      ),
-      0
-    )
-  ) {
-    return AmmV3Instruction.OpenPositionV2;
-  }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([77, 255, 174, 82, 125, 29, 201, 46])
       ),
       0
@@ -395,17 +341,6 @@ export function identifyAmmV3Instruction(
     )
   ) {
     return AmmV3Instruction.SetRewardParams;
-  }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([248, 198, 158, 145, 225, 117, 135, 200])
-      ),
-      0
-    )
-  ) {
-    return AmmV3Instruction.Swap;
   }
   if (
     containsBytes(
@@ -520,14 +455,8 @@ export type ParsedAmmV3Instruction<
       instructionType: AmmV3Instruction.CreateSupportMintAssociated;
     } & ParsedCreateSupportMintAssociatedInstruction<TProgram>)
   | ({
-      instructionType: AmmV3Instruction.DecreaseLiquidity;
-    } & ParsedDecreaseLiquidityInstruction<TProgram>)
-  | ({
       instructionType: AmmV3Instruction.DecreaseLiquidityV2;
     } & ParsedDecreaseLiquidityV2Instruction<TProgram>)
-  | ({
-      instructionType: AmmV3Instruction.IncreaseLiquidity;
-    } & ParsedIncreaseLiquidityInstruction<TProgram>)
   | ({
       instructionType: AmmV3Instruction.IncreaseLiquidityV2;
     } & ParsedIncreaseLiquidityV2Instruction<TProgram>)
@@ -535,20 +464,11 @@ export type ParsedAmmV3Instruction<
       instructionType: AmmV3Instruction.InitializeReward;
     } & ParsedInitializeRewardInstruction<TProgram>)
   | ({
-      instructionType: AmmV3Instruction.OpenPosition;
-    } & ParsedOpenPositionInstruction<TProgram>)
-  | ({
-      instructionType: AmmV3Instruction.OpenPositionV2;
-    } & ParsedOpenPositionV2Instruction<TProgram>)
-  | ({
       instructionType: AmmV3Instruction.OpenPositionWithToken22Nft;
     } & ParsedOpenPositionWithToken22NftInstruction<TProgram>)
   | ({
       instructionType: AmmV3Instruction.SetRewardParams;
     } & ParsedSetRewardParamsInstruction<TProgram>)
-  | ({
-      instructionType: AmmV3Instruction.Swap;
-    } & ParsedSwapInstruction<TProgram>)
   | ({
       instructionType: AmmV3Instruction.SwapRouterBaseIn;
     } & ParsedSwapRouterBaseInInstruction<TProgram>)
