@@ -1,4 +1,12 @@
-import {Account, type Address, generateKeyPairSigner, type TransactionSigner,} from "@solana/kit";
+import {
+  Account,
+  type Address,
+  generateKeyPairSigner,
+  type TransactionSigner,
+  AccountMeta,
+  AccountRole,
+  Instruction,
+} from "@solana/kit";
 
 import {
   fetchMaybePersonalPositionState,
@@ -7,15 +15,26 @@ import {
   getDecreaseLiquidityV2Instruction,
   getIncreaseLiquidityV2Instruction,
   getOpenPositionWithToken22NftInstructionAsync,
+  OpenPositionWithToken22NftInstruction,
   PersonalPositionState,
   PoolState,
 } from "./generated";
 
-import type {ClmmSdkConfig, MakeInstructionResult, PositionInfo,} from "./types";
-import {ClmmError, ClmmErrorCode} from "./types";
-import {findAssociatedTokenPda} from "@solana-program/token";
-import {PoolUtils, SqrtPriceMath, TickUtils, getMetadataPda, PdaUtils} from "./utils";
-import {TOKEN_2022_PROGRAM_ADDRESS} from "@solana-program/token-2022";
+import type {
+  ClmmSdkConfig,
+  MakeInstructionResult,
+  PositionInfo,
+} from "./types";
+import { ClmmError, ClmmErrorCode } from "./types";
+import { findAssociatedTokenPda } from "@solana-program/token";
+import {
+  PoolUtils,
+  SqrtPriceMath,
+  TickUtils,
+  getMetadataPda,
+  PdaUtils,
+} from "./utils";
+import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import BN from "bn.js";
 
 export class PositionManager {
@@ -242,8 +261,25 @@ export class PositionManager {
     );
 
     // Determine amounts based on base token
-    const amount0Max = base === "MintA" ? baseAmount : otherAmountMax;
-    const amount1Max = base === "MintA" ? otherAmountMax : baseAmount;
+    // const amount0Max = base === "MintA" ? baseAmount : otherAmountMax;
+    // const amount1Max = base === "MintA" ? otherAmountMax : baseAmount;
+
+    // TODO Swapped - FIX!
+    const amount0Max = base === "MintA" ? otherAmountMax : baseAmount;
+    const amount1Max = base === "MintA" ? baseAmount : otherAmountMax;
+
+    const isOverflow = PoolUtils.isOverflowDefaultTickArrayBitmap(
+      poolAccount.data.tickSpacing,
+      [tickArrayLowerStartIndex, tickArrayUpperStartIndex],
+    );
+
+    const extBitmapAccount = isOverflow
+      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolAccount.address)
+      : undefined;
+
+    const remAccounts: AccountMeta[] = extBitmapAccount
+      ? [{ address: extBitmapAccount[0], role: AccountRole.WRITABLE }]
+      : [];
 
     const instruction = await getOpenPositionWithToken22NftInstructionAsync({
       payer: ownerInfo.wallet,
@@ -271,8 +307,13 @@ export class PositionManager {
       baseFlag: base === "MintA" ? true : false, // true = MintA is base, false = MintB is base
     });
 
+    const ixWithRemAccounts: Instruction = {
+      ...instruction,
+      accounts: [...instruction.accounts, ...remAccounts],
+    };
+
     return {
-      instructions: [instruction],
+      instructions: [ixWithRemAccounts],
       signers,
       instructionTypes: ["OpenPositionV2"],
       address: {

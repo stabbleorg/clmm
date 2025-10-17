@@ -667,7 +667,7 @@ export class PoolUtils {
   ): boolean {
     const { maxTickBondary, minTickBoundary } = this.tickRange(tickSpacing);
 
-    tickIndexs.forEach((tick) => {
+    for (const tick of tickIndexs) {
       const tickArrayStartIndex = TickUtils.getTickArrayStartIndex(
         tick,
         tickSpacing,
@@ -678,7 +678,7 @@ export class PoolUtils {
         tickArrayStartIndex <= minTickBoundary
       )
         return true;
-    });
+    }
 
     return false;
   }
