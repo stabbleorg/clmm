@@ -1,8 +1,8 @@
 use anchor_lang::AccountDeserialize;
 use anyhow::Result;
-use raydium_amm_v3::libraries::fixed_point_64;
-use raydium_amm_v3::libraries::*;
-use raydium_amm_v3::states::*;
+use stabbleorg_clmm::libraries::fixed_point_64;
+use stabbleorg_clmm::libraries::*;
+use stabbleorg_clmm::states::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::program_pack::Pack;
 use solana_sdk::{account::Account, pubkey::Pubkey};
