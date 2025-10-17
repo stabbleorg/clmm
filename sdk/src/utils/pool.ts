@@ -2,9 +2,23 @@ import type { Address } from "@solana/kit";
 import type { PoolState, AmmConfig } from "../generated";
 import { ClmmError, ClmmErrorCode } from "../types";
 import { MathUtils, SqrtPriceMath } from "./math";
-import { type TickArray } from "./tick";
-import { Q64, MIN_SQRT_RATIO, MAX_SQRT_RATIO, ZERO, ONE } from "../constants";
-import BN from "bn.js";
+import {
+  TICK_ARRAY_BITMAP_SIZE,
+  TICK_ARRAY_SIZE,
+  TickUtils,
+  type TickArray,
+} from "./tick";
+import {
+  Q64,
+  MIN_SQRT_RATIO,
+  MAX_SQRT_RATIO,
+  ZERO,
+  ONE,
+  MAX_TICK,
+  MIN_TICK,
+} from "../constants";
+import BN, { min } from "bn.js";
+import { TickQuery } from "./tickQuery";
 
 /**
  * Pool information with computed values
@@ -610,5 +624,62 @@ export class PoolUtils {
       sqrtRatioBX64.sub(sqrtRatioAX64),
       Q64,
     );
+  }
+
+  private static maxTickInTickArrayBitmap(tickSpacing: number) {
+    return tickSpacing * TICK_ARRAY_SIZE * TICK_ARRAY_BITMAP_SIZE;
+  }
+
+  private static tickRange(tickSpacing: number) {
+    let maxTickBondary = this.maxTickInTickArrayBitmap(tickSpacing);
+    let minTickBoundary = -maxTickBondary;
+
+    if (maxTickBondary >= MAX_TICK) {
+      maxTickBondary = TickUtils.getTickArrayStartIndex(
+        maxTickBondary,
+        tickSpacing,
+      );
+
+      maxTickBondary = maxTickBondary + TickQuery.tickCount(tickSpacing);
+    }
+
+    if (minTickBoundary <= MIN_TICK) {
+      minTickBoundary = TickUtils.getTickArrayStartIndex(
+        minTickBoundary,
+        tickSpacing,
+      );
+
+      minTickBoundary = minTickBoundary + TickQuery.tickCount(tickSpacing);
+    }
+
+    return { maxTickBondary, minTickBoundary };
+  }
+
+  /**
+   * Calculate if tick indexes overflow default tick array bitmap.
+   * @param tickSpacing - tick spacing
+   * @param tickIndexs - upper and lower bound start tick indexes
+   * @returns true if it overflows, false otherwise
+   */
+  public static isOverflowDefaultTickArrayBitmap(
+    tickSpacing: number,
+    tickIndexs: Array<number>,
+  ): boolean {
+    const { maxTickBondary, minTickBoundary } = this.tickRange(tickSpacing);
+
+    tickIndexs.forEach((tick) => {
+      const tickArrayStartIndex = TickUtils.getTickArrayStartIndex(
+        tick,
+        tickSpacing,
+      );
+
+      if (
+        tickArrayStartIndex >= maxTickBondary ||
+        tickArrayStartIndex <= minTickBoundary
+      )
+        return true;
+    });
+
+    return false;
   }
 }
