@@ -261,12 +261,8 @@ export class PositionManager {
     );
 
     // Determine amounts based on base token
-    // const amount0Max = base === "MintA" ? baseAmount : otherAmountMax;
-    // const amount1Max = base === "MintA" ? otherAmountMax : baseAmount;
-
-    // TODO Swapped - FIX!
-    const amount0Max = base === "MintA" ? otherAmountMax : baseAmount;
-    const amount1Max = base === "MintA" ? baseAmount : otherAmountMax;
+    const amount0Max = base === "MintA" ? baseAmount : otherAmountMax;
+    const amount1Max = base === "MintA" ? otherAmountMax : baseAmount;
 
     const isOverflow = PoolUtils.isOverflowDefaultTickArrayBitmap(
       poolAccount.data.tickSpacing,
@@ -385,6 +381,19 @@ export class PositionManager {
       ),
     );
 
+    const isOverflow = PoolUtils.isOverflowDefaultTickArrayBitmap(
+      poolState.data.tickSpacing,
+      [ownerPosition.tickLowerIndex, ownerPosition.tickUpperIndex],
+    );
+
+    const extBitmapAccount = isOverflow
+      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolState.address)
+      : undefined;
+
+    const remAccounts: AccountMeta[] = extBitmapAccount
+      ? [{ address: extBitmapAccount[0], role: AccountRole.WRITABLE }]
+      : [];
+
     const instruction = getIncreaseLiquidityV2Instruction({
       nftOwner: ownerInfo.wallet,
       nftAccount: positionNftAccount,
@@ -397,7 +406,6 @@ export class PositionManager {
       tokenAccount1: ownerInfo.tokenAccountB,
       tokenVault0: poolState.data.tokenVault0,
       tokenVault1: poolState.data.tokenVault1,
-      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       vault0Mint: poolState.data.tokenMint0,
       vault1Mint: poolState.data.tokenMint1,
       liquidity,
@@ -406,8 +414,13 @@ export class PositionManager {
       baseFlag: null,
     });
 
+    const ixWithRemAccounts: Instruction = {
+      ...instruction,
+      accounts: [...instruction.accounts, ...remAccounts],
+    };
+
     return {
-      instructions: [instruction],
+      instructions: [ixWithRemAccounts],
       signers: [],
       instructionTypes: ["IncreaseLiquidityV2"],
       address: {
@@ -480,6 +493,19 @@ export class PositionManager {
       ),
     );
 
+    const isOverflow = PoolUtils.isOverflowDefaultTickArrayBitmap(
+      poolState.data.tickSpacing,
+      [ownerPosition.tickLowerIndex, ownerPosition.tickUpperIndex],
+    );
+
+    const extBitmapAccount = isOverflow
+      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolState.address)
+      : undefined;
+
+    const remAccounts: AccountMeta[] = extBitmapAccount
+      ? [{ address: extBitmapAccount[0], role: AccountRole.WRITABLE }]
+      : [];
+
     const instruction = getDecreaseLiquidityV2Instruction({
       nftOwner: ownerInfo.wallet,
       nftAccount: positionNftAccount,
@@ -492,7 +518,6 @@ export class PositionManager {
       tickArrayUpper,
       recipientTokenAccount0: ownerInfo.tokenAccountA,
       recipientTokenAccount1: ownerInfo.tokenAccountB,
-      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       vault0Mint: poolState.data.tokenMint0,
       vault1Mint: poolState.data.tokenMint1,
       liquidity,
@@ -500,8 +525,13 @@ export class PositionManager {
       amount1Min: amountMinB,
     });
 
+    const ixWithRemAccounts: Instruction = {
+      ...instruction,
+      accounts: [...instruction.accounts, ...remAccounts],
+    };
+
     return {
-      instructions: [instruction],
+      instructions: [ixWithRemAccounts],
       signers: [],
       instructionTypes: ["DecreaseLiquidityV2"],
       address: {

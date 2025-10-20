@@ -59,6 +59,8 @@ export class PoolManager {
     MakeInstructionResult<{
       poolId: Address;
       observationId: Address;
+      tokenMint0: Address;
+      tokenMint1: Address;
       tokenVault0: Address;
       tokenVault1: Address;
     }>
@@ -81,14 +83,14 @@ export class PoolManager {
     );
 
     const [token0, token1, decimals0, decimals1, priceAdjusted] = isAFirst
-      ? [
-          tokenMintA,
+      ? [tokenMintA, tokenMintB, mintADecimals, mintBDecimals, initialPrice]
+      : [
           tokenMintB,
-          mintADecimals,
+          tokenMintA,
           mintBDecimals,
+          mintADecimals,
           new Decimal(1).div(initialPrice),
-        ]
-      : [tokenMintB, tokenMintA, mintBDecimals, mintADecimals, initialPrice];
+        ];
 
     const initialPriceX64 = SqrtPriceMath.priceToSqrtPriceX64(
       priceAdjusted,
@@ -132,6 +134,8 @@ export class PoolManager {
       address: {
         poolId: poolPda,
         observationId: observationPda,
+        tokenMint0: token0,
+        tokenMint1: token1,
         tokenVault0: tokenVault0,
         tokenVault1: tokenVault1,
       },
@@ -309,7 +313,7 @@ export class PoolManager {
 
     return {
       ...poolState,
-      currentPrice,
+      currentPrice: currentPrice.toNumber(),
       tokenA,
       tokenB,
       // These would be calculated from additional data sources
