@@ -6,7 +6,7 @@ pub enum ErrorCode {
     LOK,
     #[msg("Not approved")]
     NotApproved,
-    #[msg("invalid update amm config flag")]
+    #[msg("invalid update clmm config flag")]
     InvalidUpdateConfigFlag,
     #[msg("Account lack")]
     AccountLack,

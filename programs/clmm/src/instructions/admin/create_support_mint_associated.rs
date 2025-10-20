@@ -6,10 +6,7 @@ use std::ops::DerefMut;
 
 pub mod create_support_mint_associated_owner {
     use super::{pubkey, Pubkey};
-    #[cfg(feature = "devnet")]
     pub const ID: Pubkey = pubkey!("6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6");
-    #[cfg(not(feature = "devnet"))]
-    pub const ID: Pubkey = pubkey!("RayVyjyJQz9vAi126A4sGexKnSU1XeZaHTRcM1mZMPY");
 }
 
 #[derive(Accounts)]

@@ -11,26 +11,15 @@ use states::*;
 
 #[cfg(not(feature = "no-entrypoint"))]
 solana_security_txt::security_txt! {
-    name: "raydium-clmm",
-    project_url: "https://raydium.io",
-    contacts: "link:https://immunefi.com/bounty/raydium",
-    policy: "https://immunefi.com/bounty/raydium",
-    source_code: "https://github.com/raydium-io/raydium-clmm",
-    preferred_languages: "en",
-    auditors: "https://github.com/raydium-io/raydium-docs/blob/master/audit/OtterSec%20Q3%202022/Raydium%20concentrated%20liquidity%20(CLMM)%20program.pdf"
+    name: "stabbleorg-clmm",
+    project_url: "https://stabble.org",
+    preferred_languages: "en"
 }
 
-#[cfg(feature = "devnet")]
 declare_id!("6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6");
-#[cfg(not(feature = "devnet"))]
-declare_id!("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
-
 pub mod admin {
     use super::{pubkey, Pubkey};
-    #[cfg(feature = "devnet")]
-    pub const ID: Pubkey = pubkey!("AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw");
-    #[cfg(not(feature = "devnet"))]
-    pub const ID: Pubkey = pubkey!("AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw");
+    pub const ID: Pubkey = pubkey!("3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2");
 }
 
 #[program]
@@ -42,7 +31,7 @@ pub mod amm_v3 {
     /// # Arguments
     ///
     /// * `ctx`- The accounts needed by instruction.
-    /// * `index` - The index of amm config, there may be multiple config.
+    /// * `index` - The index of clmm config, there may be multiple config.
     /// * `tick_spacing` - The tickspacing binding with config, cannot be changed.
     /// * `trade_fee_rate` - Trade fee rate, can be changed.
     /// * `protocol_fee_rate` - The rate of protocol fee within trade fee.
@@ -75,15 +64,15 @@ pub mod amm_v3 {
         instructions::create_support_mint_associated(ctx)
     }
 
-    /// Updates the owner of the amm config
+    /// Updates the owner of the clmm config
     /// Must be called by the current owner or admin
     ///
     /// # Arguments
     ///
     /// * `ctx`- The context of accounts
-    /// * `trade_fee_rate`- The new trade fee rate of amm config, be set when `param` is 0
-    /// * `protocol_fee_rate`- The new protocol fee rate of amm config, be set when `param` is 1
-    /// * `fund_fee_rate`- The new fund fee rate of amm config, be set when `param` is 2
+    /// * `trade_fee_rate`- The new trade fee rate of clmm config, be set when `param` is 0
+    /// * `protocol_fee_rate`- The new protocol fee rate of clmm config, be set when `param` is 1
+    /// * `fund_fee_rate`- The new fund fee rate of clmm config, be set when `param` is 2
     /// * `new_owner`- The config's new owner, be set when `param` is 3
     /// * `new_fund_owner`- The config's new fund owner, be set when `param` is 4
     /// * `param`- The value can be 0 | 1 | 2 | 3 | 4, otherwise will report a error

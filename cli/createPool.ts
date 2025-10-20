@@ -13,7 +13,7 @@ export function createPool(program: Command) {
     .requiredOption("-b, --token-mint-b <string>", "Token Mint B", parsePublicKey)
     .option("--token-program-a <string>", "Token Program", parsePublicKey)
     .option("--token-program-b <string>", "Token Program", parsePublicKey)
-    .option("-c, --amm-config <string>", "AMM/CLMM Config", parsePublicKey)
+    .option("-c, --clmm-config <string>", "AMM/CLMM Config", parsePublicKey)
     .description("create a pool with the given tokens")
     .action(async({
       priceSqrt, openTime, tokenMintA, tokenMintB, tokenProgramA, tokenProgramB, ammConfig

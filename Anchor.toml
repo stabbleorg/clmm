@@ -12,9 +12,12 @@ amm_v3 = "6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6"
 [programs.devnet]
 amm_v3 = "6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6"
 
+[programs.mainnet]
+amm_v3 = "6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6"
+
 [registry]
-url = "https://github.com/raydium-io/raydium-amm-v3"
+url = "https://github.com/stabbleorg/clmm"
 
 [provider]
-cluster = "devnet"
+cluster = "mainnet"
 wallet = ".keypair/id.json"
