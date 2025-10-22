@@ -26,7 +26,10 @@ import type {
   PositionInfo,
 } from "./types";
 import { ClmmError, ClmmErrorCode } from "./types";
-import { findAssociatedTokenPda } from "@solana-program/token";
+import {
+  findAssociatedTokenPda,
+  TOKEN_PROGRAM_ADDRESS,
+} from "@solana-program/token";
 import {
   PoolUtils,
   SqrtPriceMath,
@@ -727,7 +730,7 @@ export class PositionManager {
       const response = await this.config.rpc
         .getTokenAccountsByOwner(
           wallet,
-          { programId: TOKEN_2022_PROGRAM_ADDRESS },
+          { programId: TOKEN_PROGRAM_ADDRESS },
           { encoding: "jsonParsed" },
         )
         .send();
@@ -741,7 +744,7 @@ export class PositionManager {
         )
         .send();
 
-      const allAccounts = [...response.value, ...response22.value];
+      let allAccounts = [...response.value, ...response22.value];
 
       const nftTokenAccounts = allAccounts.filter((account) => {
         const parsedInfo = account.account.data.parsed.info;

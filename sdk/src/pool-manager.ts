@@ -4,7 +4,6 @@ import {
   address,
   Account,
   Rpc,
-  SolanaRpcApi,
   SolanaRpcApiMainnet,
   SolanaRpcApiDevnet,
   SolanaRpcApiTestnet,
@@ -38,6 +37,7 @@ import {
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import BN from "bn.js";
 import Decimal from "decimal.js";
+import { getToken } from "./utils/token";
 
 export class PoolManager {
   constructor(private readonly config: ClmmSdkConfig) {}
@@ -292,7 +292,7 @@ export class PoolManager {
   /**
    * Enrich pool state with calculated fields
    */
-  private enrichPoolInfo(poolState: any): PoolInfo {
+  private async enrichPoolInfo(poolState: PoolState): Promise<PoolInfo> {
     const tokenA: TokenInfo = {
       mint: poolState.tokenMint0,
       symbol: "TOKEN_A", // Would fetch from metadata
@@ -305,8 +305,14 @@ export class PoolManager {
       decimals: poolState.mintDecimals1,
     };
 
+    // Fetch token vault balances
+    const [vault0Account, vault1Account] = await Promise.all([
+      getToken(this.config.rpc, poolState.tokenVault0),
+      getToken(this.config.rpc, poolState.tokenVault1),
+    ]);
+
     const currentPrice = this.calculatePoolPrice(
-      poolState.sqrtPriceX64,
+      new BN(poolState.sqrtPriceX64.toString()),
       tokenA.decimals,
       tokenB.decimals,
     );
@@ -316,7 +322,12 @@ export class PoolManager {
       currentPrice: currentPrice.toNumber(),
       tokenA,
       tokenB,
-      // These would be calculated from additional data sources
+      tokenVault0Amount: vault0Account
+        ? vault0Account.data.amount.toString()
+        : undefined,
+      tokenVault1Amount: vault1Account
+        ? vault1Account.data.amount.toString()
+        : undefined,
       tvl: undefined,
       volume24h: undefined,
       apy: undefined,

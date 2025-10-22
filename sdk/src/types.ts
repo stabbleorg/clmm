@@ -12,10 +12,15 @@ import BN from "bn.js";
 import { MAX_TICK, MIN_TICK } from "./constants";
 import { ClmmApiConfig } from "./api";
 
+export type SolanaRpcType =
+  | SolanaRpcApiMainnet
+  | SolanaRpcApiDevnet
+  | SolanaRpcApiTestnet;
+
 // Core SDK Configuration
 export interface ClmmSdkConfig {
   /** RPC client for Solana network operations */
-  rpc: Rpc<SolanaRpcApiMainnet | SolanaRpcApiDevnet | SolanaRpcApiTestnet>;
+  rpc: Rpc<SolanaRpcType>;
   /** API client config */
   apiConfig?: ClmmApiConfig;
   /** Optional program address override */
@@ -49,6 +54,10 @@ export interface PoolInfo extends PoolState {
   tokenA: TokenInfo;
   /** Token B symbol/metadata */
   tokenB: TokenInfo;
+  /** Amount of TokenA held in pools' tokenVault0 account */
+  tokenVault0Amount?: string;
+  /** Amount of TokenB held in pools' tokenVault1 account */
+  tokenVault1Amount?: string;
   /** Total value locked in USD */
   tvl?: number;
   /** 24h volume in USD */
