@@ -1,6 +1,6 @@
 {
   "name": "@stabbleorg/mclmm-sdk",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "SDK for Stabble's margin-enabled concentrated liquidity market maker",
   "main": "lib/index.js",
   "module": "lib/index.mjs",
