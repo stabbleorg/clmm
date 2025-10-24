@@ -4,6 +4,7 @@ import { PoolManager } from "./pool-manager";
 import { PositionManager } from "./position-manager";
 import { ClmmApi } from "./api";
 import { getApisFromEndpoint } from "./utils";
+import { SwapManager } from "./swap";
 // import { SwapManager } from './swap';
 // import { RewardsManager } from './rewards';
 
@@ -19,6 +20,7 @@ export class ClmmSdk {
 
   /** Position management functionality */
   public readonly positions: PositionManager;
+  public readonly swapManager: SwapManager;
 
   /** Swap functionality */
   // public readonly swap: SwapManager;
@@ -41,6 +43,7 @@ export class ClmmSdk {
 
     this.pools = new PoolManager(config);
     this.positions = new PositionManager(config);
+    this.swapManager = new SwapManager(config);
     // this.swap = new SwapManager(config);
     // this.rewards = new RewardsManager(config);
   }

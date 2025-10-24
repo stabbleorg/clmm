@@ -36,12 +36,7 @@ export {
   // Instruction functions (commonly used)
   getCreatePoolInstruction,
   getCreateAmmConfigInstruction,
-  getOpenPositionInstruction,
-  getOpenPositionV2Instruction,
-  getIncreaseLiquidityInstruction,
-  getDecreaseLiquidityInstruction,
   getClosePositionInstruction,
-  getSwapInstruction,
   getSwapV2Instruction,
 
   // Fetch functions
