@@ -720,21 +720,12 @@ export class PositionManager {
   }
 
   /**
-   * Get all positions for a wallet with enriched information
+   * Get all positions for a wallet
    * @param wallet - Wallet address
-   * @returns Array of enriched positions owned by the wallet
+   * @returns Array of positions owned by the wallet
    */
   async getPositionsForWallet(wallet: Address): Promise<PositionInfo[]> {
     try {
-      // Fetch SPL token accounts
-      const response = await this.config.rpc
-        .getTokenAccountsByOwner(
-          wallet,
-          { programId: TOKEN_PROGRAM_ADDRESS },
-          { encoding: "jsonParsed" },
-        )
-        .send();
-
       // Fetch Token-2022 accounts
       const response22 = await this.config.rpc
         .getTokenAccountsByOwner(
@@ -744,9 +735,9 @@ export class PositionManager {
         )
         .send();
 
-      let allAccounts = [...response.value, ...response22.value];
+      let tokenAccounts = [...response22.value];
 
-      const nftTokenAccounts = allAccounts.filter((account) => {
+      const nftTokenAccounts = tokenAccounts.filter((account) => {
         const parsedInfo = account.account.data.parsed.info;
         return (
           parsedInfo.tokenAmount.amount == "1" &&
