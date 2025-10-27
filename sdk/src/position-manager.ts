@@ -1,4 +1,12 @@
-import {Account, type Address, generateKeyPairSigner, type TransactionSigner,} from "@solana/kit";
+import {
+  Account,
+  type Address,
+  generateKeyPairSigner,
+  type TransactionSigner,
+  AccountMeta,
+  AccountRole,
+  Instruction,
+} from "@solana/kit";
 
 import {
   fetchMaybePersonalPositionState,
@@ -7,15 +15,29 @@ import {
   getDecreaseLiquidityV2Instruction,
   getIncreaseLiquidityV2Instruction,
   getOpenPositionWithToken22NftInstructionAsync,
+  OpenPositionWithToken22NftInstruction,
   PersonalPositionState,
   PoolState,
 } from "./generated";
 
-import type {ClmmSdkConfig, MakeInstructionResult, PositionInfo,} from "./types";
-import {ClmmError, ClmmErrorCode} from "./types";
-import {findAssociatedTokenPda} from "@solana-program/token";
-import {PoolUtils, SqrtPriceMath, TickUtils, getMetadataPda, PdaUtils} from "./utils";
-import {TOKEN_2022_PROGRAM_ADDRESS} from "@solana-program/token-2022";
+import type {
+  ClmmSdkConfig,
+  MakeInstructionResult,
+  PositionInfo,
+} from "./types";
+import { ClmmError, ClmmErrorCode } from "./types";
+import {
+  findAssociatedTokenPda,
+  TOKEN_PROGRAM_ADDRESS,
+} from "@solana-program/token";
+import {
+  PoolUtils,
+  SqrtPriceMath,
+  TickUtils,
+  getMetadataPda,
+  PdaUtils,
+} from "./utils";
+import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import BN from "bn.js";
 
 export class PositionManager {
@@ -245,6 +267,19 @@ export class PositionManager {
     const amount0Max = base === "MintA" ? baseAmount : otherAmountMax;
     const amount1Max = base === "MintA" ? otherAmountMax : baseAmount;
 
+    const isOverflow = PoolUtils.isOverflowDefaultTickArrayBitmap(
+      poolAccount.data.tickSpacing,
+      [tickArrayLowerStartIndex, tickArrayUpperStartIndex],
+    );
+
+    const extBitmapAccount = isOverflow
+      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolAccount.address)
+      : undefined;
+
+    const remAccounts: AccountMeta[] = extBitmapAccount
+      ? [{ address: extBitmapAccount[0], role: AccountRole.WRITABLE }]
+      : [];
+
     const instruction = await getOpenPositionWithToken22NftInstructionAsync({
       payer: ownerInfo.wallet,
       positionNftOwner: ownerInfo.wallet.address,
@@ -271,8 +306,13 @@ export class PositionManager {
       baseFlag: base === "MintA" ? true : false, // true = MintA is base, false = MintB is base
     });
 
+    const ixWithRemAccounts: Instruction = {
+      ...instruction,
+      accounts: [...instruction.accounts, ...remAccounts],
+    };
+
     return {
-      instructions: [instruction],
+      instructions: [ixWithRemAccounts],
       signers,
       instructionTypes: ["OpenPositionV2"],
       address: {
@@ -344,6 +384,19 @@ export class PositionManager {
       ),
     );
 
+    const isOverflow = PoolUtils.isOverflowDefaultTickArrayBitmap(
+      poolState.data.tickSpacing,
+      [ownerPosition.tickLowerIndex, ownerPosition.tickUpperIndex],
+    );
+
+    const extBitmapAccount = isOverflow
+      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolState.address)
+      : undefined;
+
+    const remAccounts: AccountMeta[] = extBitmapAccount
+      ? [{ address: extBitmapAccount[0], role: AccountRole.WRITABLE }]
+      : [];
+
     const instruction = getIncreaseLiquidityV2Instruction({
       nftOwner: ownerInfo.wallet,
       nftAccount: positionNftAccount,
@@ -356,7 +409,6 @@ export class PositionManager {
       tokenAccount1: ownerInfo.tokenAccountB,
       tokenVault0: poolState.data.tokenVault0,
       tokenVault1: poolState.data.tokenVault1,
-      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       vault0Mint: poolState.data.tokenMint0,
       vault1Mint: poolState.data.tokenMint1,
       liquidity,
@@ -365,8 +417,13 @@ export class PositionManager {
       baseFlag: null,
     });
 
+    const ixWithRemAccounts: Instruction = {
+      ...instruction,
+      accounts: [...instruction.accounts, ...remAccounts],
+    };
+
     return {
-      instructions: [instruction],
+      instructions: [ixWithRemAccounts],
       signers: [],
       instructionTypes: ["IncreaseLiquidityV2"],
       address: {
@@ -439,6 +496,19 @@ export class PositionManager {
       ),
     );
 
+    const isOverflow = PoolUtils.isOverflowDefaultTickArrayBitmap(
+      poolState.data.tickSpacing,
+      [ownerPosition.tickLowerIndex, ownerPosition.tickUpperIndex],
+    );
+
+    const extBitmapAccount = isOverflow
+      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolState.address)
+      : undefined;
+
+    const remAccounts: AccountMeta[] = extBitmapAccount
+      ? [{ address: extBitmapAccount[0], role: AccountRole.WRITABLE }]
+      : [];
+
     const instruction = getDecreaseLiquidityV2Instruction({
       nftOwner: ownerInfo.wallet,
       nftAccount: positionNftAccount,
@@ -451,7 +521,6 @@ export class PositionManager {
       tickArrayUpper,
       recipientTokenAccount0: ownerInfo.tokenAccountA,
       recipientTokenAccount1: ownerInfo.tokenAccountB,
-      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       vault0Mint: poolState.data.tokenMint0,
       vault1Mint: poolState.data.tokenMint1,
       liquidity,
@@ -459,8 +528,13 @@ export class PositionManager {
       amount1Min: amountMinB,
     });
 
+    const ixWithRemAccounts: Instruction = {
+      ...instruction,
+      accounts: [...instruction.accounts, ...remAccounts],
+    };
+
     return {
-      instructions: [instruction],
+      instructions: [ixWithRemAccounts],
       signers: [],
       instructionTypes: ["DecreaseLiquidityV2"],
       address: {
@@ -646,21 +720,12 @@ export class PositionManager {
   }
 
   /**
-   * Get all positions for a wallet with enriched information
+   * Get all positions for a wallet
    * @param wallet - Wallet address
-   * @returns Array of enriched positions owned by the wallet
+   * @returns Array of positions owned by the wallet
    */
   async getPositionsForWallet(wallet: Address): Promise<PositionInfo[]> {
     try {
-      // Fetch SPL token accounts
-      const response = await this.config.rpc
-        .getTokenAccountsByOwner(
-          wallet,
-          { programId: TOKEN_2022_PROGRAM_ADDRESS },
-          { encoding: "jsonParsed" },
-        )
-        .send();
-
       // Fetch Token-2022 accounts
       const response22 = await this.config.rpc
         .getTokenAccountsByOwner(
@@ -670,9 +735,9 @@ export class PositionManager {
         )
         .send();
 
-      const allAccounts = [...response.value, ...response22.value];
+      let tokenAccounts = [...response22.value];
 
-      const nftTokenAccounts = allAccounts.filter((account) => {
+      const nftTokenAccounts = tokenAccounts.filter((account) => {
         const parsedInfo = account.account.data.parsed.info;
         return (
           parsedInfo.tokenAmount.amount == "1" &&
