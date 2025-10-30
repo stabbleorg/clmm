@@ -6,6 +6,7 @@ import {
   AccountMeta,
   AccountRole,
   Instruction,
+  address,
 } from "@solana/kit";
 
 import {
@@ -15,7 +16,6 @@ import {
   getDecreaseLiquidityV2Instruction,
   getIncreaseLiquidityV2Instruction,
   getOpenPositionWithToken22NftInstructionAsync,
-  OpenPositionWithToken22NftInstruction,
   PersonalPositionState,
   PoolState,
 } from "./generated";
@@ -27,6 +27,9 @@ import type {
 } from "./types";
 import { ClmmError, ClmmErrorCode } from "./types";
 import {
+  getCreateAssociatedTokenInstruction,
+  getSyncNativeInstruction,
+  ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   findAssociatedTokenPda,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
@@ -39,9 +42,37 @@ import {
 } from "./utils";
 import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import BN from "bn.js";
+import { NATIVE_MINT } from "@solana/spl-token";
+import { getTransferSolInstruction } from "@solana-program/system";
+import { SYSTEM_PROGRAM_ID } from "./constants";
 
 export class PositionManager {
   constructor(private readonly config: ClmmSdkConfig) {}
+
+  private buildWrapSolInstructions(params: {
+    payer: TransactionSigner;
+    ata: Address;
+    owner: Address;
+    amount: bigint;
+  }): Instruction[] {
+    const { payer, ata, owner, amount } = params;
+    return [
+      getCreateAssociatedTokenInstruction({
+        payer,
+        ata,
+        owner,
+        mint: address(NATIVE_MINT.toString()),
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+        systemProgram: SYSTEM_PROGRAM_ID,
+      }),
+      getTransferSolInstruction({
+        source: payer,
+        destination: ata,
+        amount,
+      }),
+      getSyncNativeInstruction({ account: ata }),
+    ];
+  }
 
   /**
    * Make open position from liquidity instructions
@@ -279,6 +310,28 @@ export class PositionManager {
     const remAccounts: AccountMeta[] = extBitmapAccount
       ? [{ address: extBitmapAccount[0], role: AccountRole.WRITABLE }]
       : [];
+    
+    const wrapSolInstructions: Instruction[] = [];
+
+    if (poolAccount.data.tokenMint0.toString() === NATIVE_MINT.toString()) {
+      wrapSolInstructions.push(
+        ...this.buildWrapSolInstructions({
+          payer: ownerInfo.wallet,
+          ata: ownerInfo.tokenAccountA,
+          owner: ownerInfo.wallet.address,
+          amount: baseAmount,
+        }),
+      );
+    } else if (poolAccount.data.tokenMint1.toString() === NATIVE_MINT.toString()) {
+      wrapSolInstructions.push(
+        ...this.buildWrapSolInstructions({
+          payer: ownerInfo.wallet,
+          ata: ownerInfo.tokenAccountB,
+          owner: ownerInfo.wallet.address,
+          amount: baseAmount,
+        }),
+      );
+    }
 
     const instruction = await getOpenPositionWithToken22NftInstructionAsync({
       payer: ownerInfo.wallet,
@@ -312,7 +365,7 @@ export class PositionManager {
     };
 
     return {
-      instructions: [ixWithRemAccounts],
+      instructions: [...wrapSolInstructions,ixWithRemAccounts],
       signers,
       instructionTypes: ["OpenPositionV2"],
       address: {

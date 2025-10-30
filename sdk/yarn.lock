@@ -410,6 +410,11 @@
   resolved "https://registry.yarnpkg.com/@rollup/rollup-win32-x64-msvc/-/rollup-win32-x64-msvc-4.52.2.tgz#cf83e2c56b581bad4614eeb3d2da5b5917ed34ec"
   integrity sha512-ARz+Bs8kY6FtitYM96PqPEVvPXqEZmPZsSkXvyX19YzDqkCaIlhCieLLMI5hxO9SRZ2XtCtm8wxhy0iJ2jxNfw==
 
+"@solana-program/system@^0.9.0":
+  version "0.9.0"
+  resolved "https://registry.yarnpkg.com/@solana-program/system/-/system-0.9.0.tgz#ae18325200b6e4d8a6bc757dea99cf9da5679f2f"
+  integrity sha512-yu+i0SZ+c+0E9Cy+btoMiCbxRnP/FLQuv/Ba8l2klZApAiOX1Ja/2IGkctFV36fglsI7PwD9czkSkHm8og+QeA==
+
 "@solana-program/token-2022@^0.5.0":
   version "0.5.0"
   resolved "https://registry.yarnpkg.com/@solana-program/token-2022/-/token-2022-0.5.0.tgz#350a4433e50a2808560682c0c0fdef4079e5ef54"
