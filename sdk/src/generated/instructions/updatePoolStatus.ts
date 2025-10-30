@@ -48,7 +48,7 @@ export type UpdatePoolStatusInstruction<
   TProgram extends string = typeof AMM_V3_PROGRAM_ADDRESS,
   TAccountAuthority extends
     | string
-    | AccountMeta<string> = 'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw',
+    | AccountMeta<string> = '3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2',
   TAccountPoolState extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
@@ -140,7 +140,7 @@ export function getUpdatePoolStatusInstruction<
   // Resolve default values.
   if (!accounts.authority.value) {
     accounts.authority.value =
-      'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw' as Address<'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw'>;
+      '3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2' as Address<'3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2'>;
   }
 
   const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');

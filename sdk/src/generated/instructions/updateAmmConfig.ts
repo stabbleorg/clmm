@@ -50,7 +50,7 @@ export type UpdateAmmConfigInstruction<
   TProgram extends string = typeof AMM_V3_PROGRAM_ADDRESS,
   TAccountOwner extends
     | string
-    | AccountMeta<string> = 'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw',
+    | AccountMeta<string> = '3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2',
   TAccountAmmConfig extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
@@ -112,7 +112,7 @@ export type UpdateAmmConfigInput<
   TAccountOwner extends string = string,
   TAccountAmmConfig extends string = string,
 > = {
-  /** The amm config owner or admin */
+  /** The clmm config owner or admin */
   owner?: TransactionSigner<TAccountOwner>;
   /** Amm config account to be changed */
   ammConfig: Address<TAccountAmmConfig>;
@@ -151,7 +151,7 @@ export function getUpdateAmmConfigInstruction<
   // Resolve default values.
   if (!accounts.owner.value) {
     accounts.owner.value =
-      'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw' as Address<'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw'>;
+      '3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2' as Address<'3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2'>;
   }
 
   const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
@@ -177,7 +177,7 @@ export type ParsedUpdateAmmConfigInstruction<
 > = {
   programAddress: Address<TProgram>;
   accounts: {
-    /** The amm config owner or admin */
+    /** The clmm config owner or admin */
     owner: TAccountMetas[0];
     /** Amm config account to be changed */
     ammConfig: TAccountMetas[1];

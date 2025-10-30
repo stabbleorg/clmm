@@ -45,6 +45,8 @@ export type PoolCreatedEvent = {
   tokenVault0: Address;
   /** Vault of token_1 */
   tokenVault1: Address;
+  /** The PublicKey of the config account with fee rates etc */
+  ammConfig: Address;
 };
 
 export type PoolCreatedEventArgs = {
@@ -64,6 +66,8 @@ export type PoolCreatedEventArgs = {
   tokenVault0: Address;
   /** Vault of token_1 */
   tokenVault1: Address;
+  /** The PublicKey of the config account with fee rates etc */
+  ammConfig: Address;
 };
 
 export function getPoolCreatedEventEncoder(): FixedSizeEncoder<PoolCreatedEventArgs> {
@@ -76,6 +80,7 @@ export function getPoolCreatedEventEncoder(): FixedSizeEncoder<PoolCreatedEventA
     ['tick', getI32Encoder()],
     ['tokenVault0', getAddressEncoder()],
     ['tokenVault1', getAddressEncoder()],
+    ['ammConfig', getAddressEncoder()],
   ]);
 }
 
@@ -89,6 +94,7 @@ export function getPoolCreatedEventDecoder(): FixedSizeDecoder<PoolCreatedEvent>
     ['tick', getI32Decoder()],
     ['tokenVault0', getAddressDecoder()],
     ['tokenVault1', getAddressDecoder()],
+    ['ammConfig', getAddressDecoder()],
   ]);
 }
 

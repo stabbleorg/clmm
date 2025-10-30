@@ -46,7 +46,7 @@ export type CloseProtocolPositionInstruction<
   TProgram extends string = typeof AMM_V3_PROGRAM_ADDRESS,
   TAccountAdmin extends
     | string
-    | AccountMeta<string> = 'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw',
+    | AccountMeta<string> = '3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2',
   TAccountProtocolPosition extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
@@ -135,7 +135,7 @@ export function getCloseProtocolPositionInstruction<
   // Resolve default values.
   if (!accounts.admin.value) {
     accounts.admin.value =
-      'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw' as Address<'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw'>;
+      '3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2' as Address<'3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2'>;
   }
 
   const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');

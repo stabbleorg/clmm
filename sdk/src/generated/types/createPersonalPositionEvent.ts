@@ -28,6 +28,10 @@ import {
 export type CreatePersonalPositionEvent = {
   /** The pool for which liquidity was added */
   poolState: Address;
+  /** The personal position */
+  personalPosition: Address;
+  /** The nft mint address for the position */
+  nftMint: Address;
   /** The address that create the position */
   minter: Address;
   /** The owner of the position and recipient of any minted liquidity */
@@ -51,6 +55,10 @@ export type CreatePersonalPositionEvent = {
 export type CreatePersonalPositionEventArgs = {
   /** The pool for which liquidity was added */
   poolState: Address;
+  /** The personal position */
+  personalPosition: Address;
+  /** The nft mint address for the position */
+  nftMint: Address;
   /** The address that create the position */
   minter: Address;
   /** The owner of the position and recipient of any minted liquidity */
@@ -74,6 +82,8 @@ export type CreatePersonalPositionEventArgs = {
 export function getCreatePersonalPositionEventEncoder(): FixedSizeEncoder<CreatePersonalPositionEventArgs> {
   return getStructEncoder([
     ['poolState', getAddressEncoder()],
+    ['personalPosition', getAddressEncoder()],
+    ['nftMint', getAddressEncoder()],
     ['minter', getAddressEncoder()],
     ['nftOwner', getAddressEncoder()],
     ['tickLowerIndex', getI32Encoder()],
@@ -89,6 +99,8 @@ export function getCreatePersonalPositionEventEncoder(): FixedSizeEncoder<Create
 export function getCreatePersonalPositionEventDecoder(): FixedSizeDecoder<CreatePersonalPositionEvent> {
   return getStructDecoder([
     ['poolState', getAddressDecoder()],
+    ['personalPosition', getAddressDecoder()],
+    ['nftMint', getAddressDecoder()],
     ['minter', getAddressDecoder()],
     ['nftOwner', getAddressDecoder()],
     ['tickLowerIndex', getI32Decoder()],
