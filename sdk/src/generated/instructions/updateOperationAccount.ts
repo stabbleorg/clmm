@@ -54,7 +54,7 @@ export type UpdateOperationAccountInstruction<
   TProgram extends string = typeof AMM_V3_PROGRAM_ADDRESS,
   TAccountOwner extends
     | string
-    | AccountMeta<string> = 'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw',
+    | AccountMeta<string> = '3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2',
   TAccountOperationState extends string | AccountMeta<string> = string,
   TAccountSystemProgram extends
     | string
@@ -175,7 +175,7 @@ export async function getUpdateOperationAccountInstructionAsync<
   // Resolve default values.
   if (!accounts.owner.value) {
     accounts.owner.value =
-      'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw' as Address<'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw'>;
+      '3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2' as Address<'3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2'>;
   }
   if (!accounts.operationState.value) {
     accounts.operationState.value = await getProgramDerivedAddress({
@@ -263,7 +263,7 @@ export function getUpdateOperationAccountInstruction<
   // Resolve default values.
   if (!accounts.owner.value) {
     accounts.owner.value =
-      'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw' as Address<'AMeGg9qpzv1geQpiEWzhgXempJTuYYZeuLLKX1cYbmaw'>;
+      '3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2' as Address<'3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2'>;
   }
   if (!accounts.systemProgram.value) {
     accounts.systemProgram.value =

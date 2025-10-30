@@ -18,7 +18,7 @@ import { AMM_V3_PROGRAM_ADDRESS } from '../programs';
 export const AMM_V3_ERROR__L_O_K = 0x1770; // 6000
 /** NotApproved: Not approved */
 export const AMM_V3_ERROR__NOT_APPROVED = 0x1771; // 6001
-/** InvalidUpdateConfigFlag: invalid update amm config flag */
+/** InvalidUpdateConfigFlag: invalid update clmm config flag */
 export const AMM_V3_ERROR__INVALID_UPDATE_CONFIG_FLAG = 0x1772; // 6002
 /** AccountLack: Account lack */
 export const AMM_V3_ERROR__ACCOUNT_LACK = 0x1773; // 6003
@@ -173,7 +173,7 @@ if (process.env.NODE_ENV !== 'production') {
     [AMM_V3_ERROR__INVALID_TICK_ARRAY]: `Invalid tick array account`,
     [AMM_V3_ERROR__INVALID_TICK_ARRAY_BOUNDARY]: `Invalid tick array boundary`,
     [AMM_V3_ERROR__INVALID_TICK_INDEX]: `Tick out of range`,
-    [AMM_V3_ERROR__INVALID_UPDATE_CONFIG_FLAG]: `invalid update amm config flag`,
+    [AMM_V3_ERROR__INVALID_UPDATE_CONFIG_FLAG]: `invalid update clmm config flag`,
     [AMM_V3_ERROR__LIQUIDITY_ADD_VALUE_ERR]: `Liquidity add delta L must be greater, or equal to before`,
     [AMM_V3_ERROR__LIQUIDITY_INSUFFICIENT]: `Liquidity insufficient`,
     [AMM_V3_ERROR__LIQUIDITY_SUB_VALUE_ERR]: `Liquidity sub delta L must be smaller than before`,
