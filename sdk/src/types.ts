@@ -27,6 +27,13 @@ export interface ClmmSdkConfig {
   programAddress?: Address;
   /** Default commitment level for transactions */
   commitment?: "processed" | "confirmed" | "finalized";
+  /** Optional logger for production-friendly logging */
+  logger?: {
+    debug?: (message: string, ...args: any[]) => void;
+    info?: (message: string, ...args: any[]) => void;
+    warn?: (message: string, ...args: any[]) => void;
+    error?: (message: string, ...args: any[]) => void;
+  };
 }
 
 // Instruction Builder Result Type
@@ -169,7 +176,7 @@ export interface SwapRoute {
   tokenIn: Address;
   /** Output token */
   tokenOut: Address;
-  /** Fee tier */
+  /** Fee tier in parts per million (PPM), e.g., 3000 = 0.3% */
   fee: number;
 }
 
@@ -178,7 +185,7 @@ export interface SwapParams {
   tokenIn: Address;
   /** Output token mint */
   tokenOut: Address;
-  /** Input amount */
+  /** Input amount (for exact-in swaps) or maximum input (for exact-out swaps) */
   amountIn: BN;
   /** Slippage tolerance (0-1, e.g., 0.01 for 1%) */
   slippageTolerance: number;
@@ -186,6 +193,10 @@ export interface SwapParams {
   wallet: Address;
   /** Optional deadline for transaction */
   deadline?: BN;
+  /** Swap mode: true = exact-in (default), false = exact-out */
+  isBaseInput?: boolean;
+  /** Desired output amount (for exact-out swaps only) */
+  amountOut?: BN;
 }
 
 // Liquidity Management Types
@@ -293,6 +304,7 @@ export enum ClmmErrorCode {
   SWAP_AMOUNT_CANNOT_BE_ZERO = "SWAP_AMOUNT_CANNOT_BE_ZERO",
   SWAP_INPUT_OR_OUTPUT_AMOUNT_TOO_SMALL = "SWAP_INPUT_OR_OUTPUT_AMOUNT_TOO_SMALL",
   INPUT_POOL_VAULT_IS_INVALID = "INPUT_POOL_VAULT_IS_INVALID",
+  SWAP_SIMULATION_FAILED = "SWAP_SIMULATION_FAILED",
 
   // Transaction related
   TRANSACTION_FAILED = "TRANSACTION_FAILED",
@@ -336,7 +348,7 @@ export class ClmmError extends Error {
   constructor(
     public code: ClmmErrorCode,
     message: string,
-    public details?: unknown,
+    public details?: unknown
   ) {
     super(message);
     this.name = "ClmmError";

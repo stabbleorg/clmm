@@ -36,7 +36,7 @@ export const MIN_TICK = -443636;
 export const MAX_TICK = 443636;
 export const MIN_SQRT_RATIO = new BN("4295128739");
 export const MAX_SQRT_RATIO = new BN(
-  "1461446703485210103287273052203988822378723970342",
+  "1461446703485210103287273052203988822378723970342"
 );
 
 // Configuration and Constants
@@ -44,6 +44,7 @@ export const DEFAULT_SLIPPAGE_TOLERANCE = 0.01; // 1%
 export const DEFAULT_DEADLINE_SECONDS = 300; // 5 minutes
 
 export const FEE_RATE_DENOMINATOR = new BN(10).pow(new BN(6));
+export const FEE_RATE_DENOMINATOR_NUMBER = 1_000_000; // PPM for number calculations
 
 // Additional math constants
 export const U64Resolution = 64;
@@ -86,6 +87,48 @@ export const DEFAULT_CONFIG = {
 
 // Pool size constants
 export const TICKS_PER_ARRAY = 60;
+
+/**
+ * Price impact thresholds for swap warnings/errors (fractions: 0-1 range)
+ *
+ * Examples:
+ * - 0.05 = 5% price impact
+ * - 0.15 = 15% price impact
+ */
+export const PRICE_IMPACT_THRESHOLDS = {
+  /** Warn users at 5% price impact */
+  WARNING: 0.05,
+  /** Show error/prevent swap at 15% price impact */
+  ERROR: 0.15,
+  /** Switch to accurate quote computation above 5% impact */
+  USE_ACCURATE_QUOTE: 0.05,
+} as const;
+
+/**
+ * Slippage calculation constants
+ */
+export const SLIPPAGE_CALC = {
+  /** Minimum base slippage (0.1%) */
+  MIN_BASE: 0.001,
+  /** Trade size denominator for log calculation */
+  SIZE_DENOMINATOR: 1e6,
+  /** Size multiplier factor */
+  SIZE_FACTOR: 0.001,
+  /** Risk multipliers by tolerance level */
+  RISK_MULTIPLIERS: {
+    low: 1.5,
+    medium: 1.0,
+    high: 0.7,
+  },
+} as const;
+
+/**
+ * Cache settings for PoolDataManager
+ */
+export const CACHE_SETTINGS = {
+  /** Default cache TTL in milliseconds (10 seconds) */
+  DEFAULT_TTL: 10_000,
+} as const;
 
 // PDA seeds
 export const PDA_SEEDS = {
