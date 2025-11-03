@@ -17,11 +17,8 @@ export type {
   SwapSimulation,
 } from "./swap";
 export { PoolDataManager } from "./managers/pool-data-manager";
-export { PriceStreamManager } from "./managers/price-stream-manager";
-export type {
-  PriceUpdate,
-  StreamConfig,
-} from "./managers/price-stream-manager";
+export { PriceApiClient } from "./managers/price-api-client";
+export type { PriceApiConfig, PriceData } from "./managers/price-api-client";
 // export { RewardsManager } from "./rewards";
 
 // Type definitions

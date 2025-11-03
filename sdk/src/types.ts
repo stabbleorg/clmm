@@ -23,6 +23,13 @@ export interface ClmmSdkConfig {
   rpc: Rpc<SolanaRpcType>;
   /** API client config */
   apiConfig?: ClmmApiConfig;
+  /** Price API configuration (for real-time price fetching) */
+  priceApiConfig?: {
+    /** Base URL for price API*/
+    baseUrl: string;
+    /** Request timeout in milliseconds (default: 5000) */
+    timeout?: number;
+  };
   /** Optional program address override */
   programAddress?: Address;
   /** Default commitment level for transactions */

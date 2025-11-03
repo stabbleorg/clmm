@@ -35,9 +35,8 @@ import {
 } from "./constants";
 import {
   PoolDataManager,
-  PriceStreamManager,
-  type StreamConfig,
-  type PriceUpdate,
+  PriceApiClient,
+  type PriceApiConfig,
 } from "./managers";
 import BN from "bn.js";
 import Decimal from "decimal.js";
@@ -549,8 +548,39 @@ interface CachedQuote {
 }
 
 export interface SwapManagerConfig {
-  enableStreaming?: boolean;
-  streamConfig?: StreamConfig;
+  /**
+   * Price API configuration
+   *
+   * Configuration for REST API price fetching from team's infrastructure.
+   * This avoids exposing RPC URIs and handles rate limiting centrally.
+   *
+   * Configuration:
+   * - baseUrl: 'https://mclmm-api.stabble.org' for production
+   * - baseUrl: 'https://dev-mclmm-api.stabble.org' for development
+   * - timeout: Optional request timeout (default: 5000ms)
+   *
+   * When enabled, provides:
+   * - Pre-swap price validation against market prices
+   * - Price staleness detection
+   * - Batch price fetching for multi-pool operations
+   * - Automatic retry with concurrency control
+   */
+  priceApiConfig?: {
+    baseUrl: string;
+    timeout?: number;
+  };
+  /**
+   * Enable market price validation before swaps (requires priceApiConfig)
+   *
+   * When enabled, SwapManager will fetch current market prices from the REST API
+   * and compare them against on-chain pool state. Useful for:
+   * - Detecting stale pool data
+   * - Identifying potential MEV opportunities
+   * - Validating quote accuracy
+   *
+   * Default: false (to maintain backward compatibility)
+   */
+  enablePriceValidation?: boolean;
 }
 
 /**
@@ -559,29 +589,35 @@ export interface SwapManagerConfig {
  * Why this architecture: We separate concerns into layers:
  * 1. SwapMathEngine: Pure calculations (testable, auditable)
  * 2. PoolDataManager: Data fetching and caching (optimizes RPC calls)
- * 3. PriceStreamManager: Real-time updates (optional for advanced users)
+ * 3. PriceApiClient: REST API price fetching (team's infrastructure)
  * 4. SwapManager: Orchestration (combines everything into simple APIs)
  *
  * This separation allows:
  * - Testing math independently of RPC infrastructure
  * - Reusing pool data across multiple quotes
- * - Adding streaming without breaking existing code
+ * - Optional price validation via REST API
  * - Swapping out implementations without changing interfaces
  *
  * Why caching is critical: RPC calls are slow (100-500ms) and rate-limited.
  * Without caching, getting a quote for UI display would block for half a second.
  * With caching, subsequent quotes for the same pool are instant (< 1ms).
  *
- * Why event-driven cache invalidation: Time-based TTL (5 seconds) is naive.
- * Prices can move dramatically in milliseconds during high volatility. With
- * WebSocket streaming, we invalidate caches immediately when prices change,
- * ensuring users see accurate quotes even in volatile markets.
+ * Why 2-second cache TTL: Per team spec, this balances freshness with RPC efficiency
+ * for low-traffic applications similar to app.stabble.org. More aggressive than
+ * traditional 5-10s caching but appropriate for current expected usage patterns.
  *
  * @example
  * ```typescript
+ * // Basic usage (no price API)
+ * const swapManager = new SwapManager(config);
+ *
+ * // With REST API for price validation
  * const swapManager = new SwapManager(config, {
- *   enableStreaming: true,
- *   streamConfig: { wsUrl: 'wss://api.example.com' }
+ *   priceApiConfig: {
+ *     baseUrl: 'https://mclmm-api.stabble.org', // or dev URL
+ *     timeout: 5000
+ *   },
+ *   enablePriceValidation: true
  * });
  *
  * const quote = await swapManager.getSwapQuote(poolAddress, {
@@ -595,56 +631,45 @@ export interface SwapManagerConfig {
 export class SwapManager {
   private readonly poolDataManager: PoolDataManager;
   private readonly mathEngine: SwapMathEngine;
-  private readonly priceStreamManager?: PriceStreamManager;
+  private readonly priceApiClient?: PriceApiClient;
   private readonly quoteCache = new Map<string, CachedQuote>();
-  private readonly quoteCacheTTL = 5_000; // 5 seconds
+  private readonly quoteCacheTTL = 2_000; // 2 seconds (per team spec)
   private readonly maxCacheSize = 1000; // LRU cap to prevent unbounded memory use
 
   /**
    * Creates a new SwapManager instance
    *
-   * Why streaming is optional: Not all applications need real-time price updates.
-   * Simple UIs or backend scripts can work fine with TTL-based caching. Making
-   * streaming optional reduces complexity and infrastructure requirements for
-   * basic use cases.
-   *
-   * Why we set up listeners in constructor: Event-driven cache invalidation must
-   * start immediately. If we waited until first quote, we could serve stale data
-   * that changed between construction and first use.
-   *
    * @param config - SDK configuration with RPC client and logging
-   * @param managerConfig - Optional swap manager configuration for streaming and caching
+   * @param managerConfig - Optional swap manager configuration
+   * @param managerConfig.priceApiConfig - REST API config for price validation
+   * @param managerConfig.enablePriceValidation - Enable price validation before swaps
    */
   constructor(
     private readonly config: ClmmSdkConfig,
     private readonly managerConfig?: SwapManagerConfig
   ) {
-    this.poolDataManager = new PoolDataManager(config);
+    // Initialize pool data manager with production-grade caching:
+    // - 2-second TTL for balance of freshness and RPC efficiency
+    // - "freeze" immutability for zero-cost BigInt/BN safety
+    // - Default error caching with jitter to prevent RPC hammering
+    this.poolDataManager = new PoolDataManager(config, {
+      cacheTTL: 2_000,
+      immutability: "freeze", // Zero-cost, works with BigInt/BN
+      maxEntries: 100,
+    });
     this.mathEngine = new SwapMathEngine();
 
-    // Initialize streaming if enabled
-    if (managerConfig?.enableStreaming && managerConfig.streamConfig) {
-      this.priceStreamManager = new PriceStreamManager(
-        managerConfig.streamConfig
+    // Initialize price API client if configured
+    if (managerConfig?.priceApiConfig) {
+      this.priceApiClient = new PriceApiClient({
+        ...managerConfig.priceApiConfig,
+        logger: config.logger,
+      });
+
+      this.log(
+        "info",
+        `PriceApiClient initialized with baseUrl: ${managerConfig.priceApiConfig.baseUrl}`
       );
-
-      // Set up event-driven cache invalidation
-      this.priceStreamManager.on("priceUpdate", (update: PriceUpdate) => {
-        this.handlePriceUpdate(update);
-      });
-
-      // Connect events for logging
-      this.priceStreamManager.on("connected", () => {
-        this.log("info", "Price stream connected");
-      });
-
-      this.priceStreamManager.on("disconnected", () => {
-        this.log("info", "Price stream disconnected");
-      });
-
-      this.priceStreamManager.on("error", (error: Error) => {
-        this.log("error", `Price stream error: ${error.message}`);
-      });
     }
   }
 
@@ -658,40 +683,6 @@ export class SwapManager {
       logger[level](message, ...args);
     } else if (level === "error" || level === "warn") {
       console[level](`[SwapManager] ${message}`, ...args);
-    }
-  }
-
-  /**
-   * Handles price update events from the WebSocket stream
-   *
-   * Why we clear both caches: Pool state and quotes are coupled. If the price
-   * changed, the pool's sqrt_price_x64 changed, which invalidates:
-   * 1. The cached pool state (wrong price)
-   * 2. Any quotes based on that pool (wrong amounts)
-   *
-   * Why we filter by poolAddress: Clearing everything on any update would destroy
-   * cache hit rates. We only clear affected pools, keeping unrelated quotes cached.
-   *
-   * Why we log MEV alerts: Helps developers and traders identify when they might be
-   * getting sandwich attacked. They can then increase slippage or delay the trade.
-   */
-  private handlePriceUpdate(update: PriceUpdate): void {
-    this.poolDataManager.clearPoolCache(update.poolAddress);
-
-    const keysToDelete: string[] = [];
-    for (const [key, _] of this.quoteCache) {
-      if (key.startsWith(update.poolAddress)) {
-        keysToDelete.push(key);
-      }
-    }
-
-    keysToDelete.forEach((key) => this.quoteCache.delete(key));
-
-    if (update.suspiciousActivity) {
-      this.log(
-        "warn",
-        `[MEV Alert] Suspicious activity detected on pool ${update.poolAddress} at ${new Date(update.timestamp).toISOString()}`
-      );
     }
   }
 
@@ -721,125 +712,48 @@ export class SwapManager {
   }
 
   /**
-   * Connects to the price streaming WebSocket
+   * Get comprehensive cache metrics for observability
    *
-   * Establishes a WebSocket connection for real-time price updates and MEV detection.
-   * Must be called before subscribing to pool updates.
+   * Provides detailed metrics about cache performance including:
+   * - Hit/miss rates for pool and config data
+   * - Current cache sizes
+   * - In-flight request counts
+   * - Error cache statistics
    *
-   * @throws {Error} If price streaming is not enabled in config
+   * Use this to monitor cache effectiveness and diagnose performance issues.
    *
-   * @example
-   * ```typescript
-   * await swapManager.connect();
-   * swapManager.subscribeToPriceUpdates([poolAddress1, poolAddress2]);
-   * ```
-   */
-  async connect(): Promise<void> {
-    if (!this.priceStreamManager) {
-      throw new Error(
-        "Price streaming is not enabled. Enable streaming in SwapManagerConfig."
-      );
-    }
-    await this.priceStreamManager.connect();
-  }
-
-  /**
-   * Disconnects from the price streaming WebSocket
-   *
-   * Closes the WebSocket connection and stops receiving price updates.
-   *
-   * @throws {Error} If price streaming is not enabled in config
-   */
-  disconnect(): void {
-    if (!this.priceStreamManager) {
-      throw new Error(
-        "Price streaming is not enabled. Enable streaming in SwapManagerConfig."
-      );
-    }
-    this.priceStreamManager.disconnect();
-  }
-
-  /**
-   * Subscribes to real-time price updates for specific pools
-   *
-   * Starts receiving WebSocket updates for the specified pools. Updates automatically
-   * invalidate cached quotes for affected pools.
-   *
-   * @param poolAddresses - Array of pool addresses to monitor
-   *
-   * @throws {Error} If price streaming is not enabled or not connected
+   * @returns Detailed cache metrics
    *
    * @example
    * ```typescript
-   * await swapManager.connect();
-   * swapManager.subscribeToPriceUpdates([
-   *   'PoolAddress1...',
-   *   'PoolAddress2...'
-   * ]);
+   * const metrics = swapManager.getCacheMetrics();
    *
-   * // Cache will auto-invalidate on price changes
-   * const quote = await swapManager.getSwapQuote(...);
+   * console.log('Pool cache hit rate:', metrics.poolData.pool.hitRate);
+   * console.log('Config cache hit rate:', metrics.poolData.config.hitRate);
+   * console.log('Quote cache size:', metrics.quoteCache.size);
+   * console.log('In-flight requests:', metrics.poolData.pool.inFlight);
    * ```
    */
-  subscribeToPriceUpdates(poolAddresses: Address[]): void {
-    if (!this.priceStreamManager) {
-      throw new Error(
-        "Price streaming is not enabled. Enable streaming in SwapManagerConfig."
-      );
-    }
-    this.priceStreamManager.subscribe(poolAddresses);
+  getCacheMetrics() {
+    return {
+      poolData: this.poolDataManager.getMetrics(),
+      quoteCache: {
+        size: this.quoteCache.size,
+        maxSize: this.maxCacheSize,
+        ttl: this.quoteCacheTTL,
+      },
+    };
   }
 
   /**
-   * Unsubscribes from price updates for specific pools
+   * Reset all cache metrics to zero
    *
-   * Stops receiving WebSocket updates for the specified pools.
-   *
-   * @param poolAddresses - Array of pool addresses to stop monitoring
-   *
-   * @throws {Error} If price streaming is not enabled
+   * Clears metric counters without clearing cached data.
+   * Useful for starting fresh metric collection after configuration changes
+   * or for periodic metric reporting.
    */
-  unsubscribeFromPriceUpdates(poolAddresses: Address[]): void {
-    if (!this.priceStreamManager) {
-      throw new Error(
-        "Price streaming is not enabled. Enable streaming in SwapManagerConfig."
-      );
-    }
-    this.priceStreamManager.unsubscribe(poolAddresses);
-  }
-
-  isStreamingConnected(): boolean {
-    return this.priceStreamManager?.isConnected() ?? false;
-  }
-
-  getVolatilityAdjustedSlippage(
-    poolAddress: Address,
-    baseSlippage: number,
-    bounds?: { min?: number; max?: number }
-  ): number {
-    if (!this.priceStreamManager) {
-      return baseSlippage;
-    }
-
-    return this.priceStreamManager.getRecommendedSlippage(
-      poolAddress,
-      baseSlippage,
-      bounds
-    );
-  }
-
-  getPoolVolatilityScore(poolAddress: Address): number {
-    if (!this.priceStreamManager) {
-      return 0;
-    }
-    return this.priceStreamManager.getVolatilityScore(poolAddress);
-  }
-
-  getLastPriceUpdate(poolAddress: Address): number {
-    if (!this.priceStreamManager) {
-      return 0;
-    }
-    return this.priceStreamManager.getLastUpdate(poolAddress);
+  resetCacheMetrics(): void {
+    this.poolDataManager.resetMetrics();
   }
 
   async getAtaAddresses(owner: Address, mints: Address[]): Promise<Address[]> {
@@ -903,26 +817,15 @@ export class SwapManager {
   /**
    * Determines if a cached quote is still valid
    *
-   * Why two different strategies: The validation strategy depends on available infrastructure.
+   * Uses time-based TTL (2 seconds per team spec). This balances freshness
+   * (quotes aren't too stale) with performance (enough caching to avoid RPC spam)
+   * for low-traffic applications.
    *
-   * With streaming (connected): We have real-time price updates. A cache is valid if
-   * it's newer than the last price change. This gives us accurate quotes even during
-   * volatility because we know exactly when the price moved.
-   *
-   * Without streaming (time-based): We don't know when prices changed, so we use
-   * conservative TTL (5 seconds). This balances freshness (quotes aren't too stale)
-   * with performance (enough caching to avoid RPC spam).
-   *
-   * Why streaming is better: In volatile markets, 5 seconds is an eternity. Prices
-   * can swing 10%+ in that time. Streaming ensures we never show stale quotes.
+   * Why 2 seconds: Team spec recommends 2-second polling/caching to match
+   * app.stabble.org traffic patterns. More aggressive than traditional 5-10s
+   * but appropriate for current expected usage.
    */
   private isCacheValid(cached: CachedQuote, poolAddress: Address): boolean {
-    if (this.priceStreamManager?.isConnected()) {
-      const lastUpdate =
-        this.priceStreamManager.getLastUpdate(poolAddress) || 0;
-      return cached.timestamp > lastUpdate;
-    }
-
     return Date.now() - cached.timestamp < this.quoteCacheTTL;
   }
 
@@ -972,6 +875,9 @@ export class SwapManager {
    * @param params.tokenOut - Address of the output token
    * @param params.amountIn - Amount of input token to swap (in base units)
    * @param params.slippageTolerance - Optional slippage tolerance (0-1, default: 0.01 = 1%)
+   * @param options - Optional fetch configuration
+   * @param options.signal - AbortSignal to cancel the request if needed
+   * @param options.allowStale - Return stale data immediately and refresh in background
    *
    * @returns Swap quote result with execution price, impact, fees, and minimum output
    *
@@ -981,11 +887,31 @@ export class SwapManager {
    *
    * @example
    * ```typescript
+   * // Basic usage
    * const quote = await swapManager.getSwapQuote(poolAddress, {
    *   tokenIn: usdcAddress,
    *   tokenOut: solAddress,
    *   amountIn: new BN(1_000_000), // 1 USDC (6 decimals)
    *   slippageTolerance: 0.005 // 0.5%
+   * });
+   *
+   * // With abort signal for cancellable requests
+   * const controller = new AbortController();
+   * const quote = await swapManager.getSwapQuote(poolAddress, {
+   *   tokenIn: usdcAddress,
+   *   tokenOut: solAddress,
+   *   amountIn: new BN(1_000_000),
+   * }, {
+   *   signal: controller.signal
+   * });
+   *
+   * // With stale-while-revalidate for better UX
+   * const quote = await swapManager.getSwapQuote(poolAddress, {
+   *   tokenIn: usdcAddress,
+   *   tokenOut: solAddress,
+   *   amountIn: new BN(1_000_000),
+   * }, {
+   *   allowStale: true // Returns immediately, refreshes in background
    * });
    *
    * console.log(`Price: ${quote.executionPrice}`);
@@ -998,6 +924,10 @@ export class SwapManager {
     params: Omit<SwapParams, "wallet"> & {
       tokenIn: Address;
       tokenOut: Address;
+    },
+    options?: {
+      signal?: AbortSignal;
+      allowStale?: boolean;
     }
   ): Promise<SwapQuoteResult> {
     const {
@@ -1007,10 +937,11 @@ export class SwapManager {
       slippageTolerance = DEFAULT_SLIPPAGE_TOLERANCE,
     } = params;
 
-    // Wrap RPC call in retry logic
-    const pool = await withRetry(() =>
-      this.poolDataManager.getPoolState(poolAddress)
-    );
+    // Use enhanced pool data manager with negative caching and deduplication
+    const pool = await this.poolDataManager.getPoolState(poolAddress, {
+      signal: options?.signal,
+      allowStale: options?.allowStale,
+    });
 
     const cacheKey = `${poolAddress}-${tokenIn}-${tokenOut}-${amountIn.toString()}-${slippageTolerance}-${pool.ammConfig}`;
 
@@ -1047,10 +978,11 @@ export class SwapManager {
       );
     }
 
-    // Wrap RPC call in retry logic
-    const ammConfig = await withRetry(() =>
-      this.poolDataManager.getAmmConfig(pool.ammConfig)
-    );
+    // Use enhanced pool data manager (errors are automatically cached)
+    const ammConfig = await this.poolDataManager.getAmmConfig(pool.ammConfig, {
+      signal: options?.signal,
+      allowStale: options?.allowStale,
+    });
 
     const quote = await this.mathEngine.calculateSimpleSwap({
       pool,
@@ -1073,37 +1005,6 @@ export class SwapManager {
     });
 
     return result;
-  }
-
-  async getSwapQuoteWithVolatilityAdjustment(
-    poolAddress: Address,
-    params: Omit<SwapParams, "wallet"> & {
-      tokenIn: Address;
-      tokenOut: Address;
-    },
-    bounds?: { min?: number; max?: number }
-  ): Promise<SwapQuoteResult> {
-    const baseSlippage = params.slippageTolerance || DEFAULT_SLIPPAGE_TOLERANCE;
-
-    const adjustedSlippage = this.priceStreamManager
-      ? this.getVolatilityAdjustedSlippage(poolAddress, baseSlippage, bounds)
-      : baseSlippage;
-
-    if (
-      this.priceStreamManager &&
-      Math.abs(adjustedSlippage - baseSlippage) > 0.001
-    ) {
-      const volatility = this.getPoolVolatilityScore(poolAddress);
-      this.log(
-        "info",
-        `Volatility-adjusted slippage for pool ${poolAddress}: base=${baseSlippage} -> adjusted=${adjustedSlippage} (volatility score: ${volatility})`
-      );
-    }
-
-    return this.getSwapQuote(poolAddress, {
-      ...params,
-      slippageTolerance: adjustedSlippage,
-    });
   }
 
   /**
@@ -1133,6 +1034,9 @@ export class SwapManager {
    * @param params.tokenOut - Address of the output token
    * @param params.amountIn - Amount of input token to swap (in base units)
    * @param params.slippageTolerance - Optional slippage tolerance (0-1, default: 0.01 = 1%)
+   * @param options - Optional fetch configuration
+   * @param options.signal - AbortSignal to cancel the request if needed
+   * @param options.allowStale - Return stale data immediately and refresh in background
    *
    * @returns Detailed swap quote with tick information and price breakdown
    *
@@ -1159,6 +1063,10 @@ export class SwapManager {
     params: Omit<SwapParams, "wallet"> & {
       tokenIn: Address;
       tokenOut: Address;
+    },
+    options?: {
+      signal?: AbortSignal;
+      allowStale?: boolean;
     }
   ): Promise<DetailedSwapQuote> {
     const {
@@ -1182,13 +1090,15 @@ export class SwapManager {
       );
     }
 
-    // Wrap RPC calls in retry logic
-    const pool = await withRetry(() =>
-      this.poolDataManager.getPoolState(poolAddress)
-    );
-    const ammConfig = await withRetry(() =>
-      this.poolDataManager.getAmmConfig(pool.ammConfig)
-    );
+    // Use enhanced pool data manager
+    const pool = await this.poolDataManager.getPoolState(poolAddress, {
+      signal: options?.signal,
+      allowStale: options?.allowStale,
+    });
+    const ammConfig = await this.poolDataManager.getAmmConfig(pool.ammConfig, {
+      signal: options?.signal,
+      allowStale: options?.allowStale,
+    });
 
     const zeroForOne = tokenIn === pool.tokenMint0;
     const hasTokens =
@@ -1351,12 +1261,19 @@ export class SwapManager {
       amounts: BN[];
       tokenIn: Address;
       tokenOut: Address;
+    },
+    options?: {
+      signal?: AbortSignal;
+      allowStale?: boolean;
     }
   ): Promise<Map<string, SwapQuoteResult>> {
     const quotes = new Map<string, SwapQuoteResult>();
 
-    const pool = await this.poolDataManager.getPoolState(poolAddress);
-    const ammConfig = await this.poolDataManager.getAmmConfig(pool.ammConfig);
+    const pool = await this.poolDataManager.getPoolState(poolAddress, options);
+    const ammConfig = await this.poolDataManager.getAmmConfig(
+      pool.ammConfig,
+      options
+    );
 
     const zeroForOne = params.tokenIn === pool.tokenMint0;
     const hasTokens =
@@ -1439,10 +1356,17 @@ export class SwapManager {
 
   async getDetailedPriceImpact(
     poolAddress: Address,
-    params: Omit<SwapParams, "wallet">
+    params: Omit<SwapParams, "wallet">,
+    options?: {
+      signal?: AbortSignal;
+      allowStale?: boolean;
+    }
   ): Promise<DetailedPriceImpact> {
-    const pool = await this.poolDataManager.getPoolState(poolAddress);
-    const ammConfig = await this.poolDataManager.getAmmConfig(pool.ammConfig);
+    const pool = await this.poolDataManager.getPoolState(poolAddress, options);
+    const ammConfig = await this.poolDataManager.getAmmConfig(
+      pool.ammConfig,
+      options
+    );
 
     const priceBefore = SqrtPriceMath.sqrtPriceX64ToPrice(
       new BN(pool.sqrtPriceX64.toString()),
@@ -1450,7 +1374,7 @@ export class SwapManager {
       pool.mintDecimals1
     );
 
-    const initialQuote = await this.getSwapQuote(poolAddress, params);
+    const initialQuote = await this.getSwapQuote(poolAddress, params, options);
 
     let quote: SwapQuote;
     let priceAfter: Decimal;
@@ -1458,7 +1382,8 @@ export class SwapManager {
     if (initialQuote.quote.priceImpact > PRICE_IMPACT_THRESHOLDS.WARNING) {
       const accurateQuote = await this.getAccurateSwapQuote(
         poolAddress,
-        params
+        params,
+        options
       );
       quote = accurateQuote;
       priceAfter = accurateQuote.endPrice || priceBefore;
@@ -1530,6 +1455,9 @@ export class SwapManager {
    *
    * @param poolAddress - Address of the CLMM pool
    * @param params - Swap parameters to simulate
+   * @param options - Optional fetch configuration
+   * @param options.signal - AbortSignal to cancel the request if needed
+   * @param options.allowStale - Return stale data immediately and refresh in background
    *
    * @returns Simulation result with success flag, quote, errors, and warnings
    *
@@ -1563,20 +1491,27 @@ export class SwapManager {
    */
   async simulateSwap(
     poolAddress: Address,
-    params: SwapParams
+    params: SwapParams,
+    options?: {
+      signal?: AbortSignal;
+      allowStale?: boolean;
+    }
   ): Promise<SwapSimulation> {
     const errors: string[] = [];
     const warnings: string[] = [];
 
     try {
-      const basicQuote = await this.getSwapQuote(poolAddress, params);
+      const basicQuote = await this.getSwapQuote(poolAddress, params, options);
 
       const quote =
         basicQuote.quote.priceImpact > PRICE_IMPACT_THRESHOLDS.WARNING
-          ? await this.getAccurateSwapQuote(poolAddress, params)
+          ? await this.getAccurateSwapQuote(poolAddress, params, options)
           : basicQuote.quote;
 
-      const pool = await this.poolDataManager.getPoolState(poolAddress);
+      const pool = await this.poolDataManager.getPoolState(
+        poolAddress,
+        options
+      );
       const outputDecimals =
         params.tokenIn === pool.tokenMint0
           ? pool.mintDecimals1
@@ -1708,14 +1643,17 @@ export class SwapManager {
     params: SwapParams & {
       sqrtPriceLimitX64?: BN;
     },
-    priorQuote?: SwapQuote
+    priorQuote?: SwapQuote,
+    options?: {
+      signal?: AbortSignal;
+    }
   ): Promise<Instruction> {
     let quote: SwapQuote;
 
     if (priorQuote) {
       quote = priorQuote;
     } else {
-      const simulation = await this.simulateSwap(poolAddress, params);
+      const simulation = await this.simulateSwap(poolAddress, params, options);
       if (!simulation.willSucceed) {
         throw new ClmmError(
           ClmmErrorCode.SWAP_SIMULATION_FAILED,
@@ -1726,7 +1664,7 @@ export class SwapManager {
       quote = simulation.quote;
     }
 
-    const pool = await this.poolDataManager.getPoolState(poolAddress);
+    const pool = await this.poolDataManager.getPoolState(poolAddress, options);
 
     const zeroForOne = params.tokenIn === pool.tokenMint0;
 
@@ -1773,13 +1711,181 @@ export class SwapManager {
     return getSwapV2Instruction(input);
   }
 
-  async getCurrentPrice(poolAddress: Address): Promise<Decimal> {
-    const pool = await this.poolDataManager.getPoolState(poolAddress);
+  async getCurrentPrice(
+    poolAddress: Address,
+    options?: {
+      signal?: AbortSignal;
+      allowStale?: boolean;
+    }
+  ): Promise<Decimal> {
+    const pool = await this.poolDataManager.getPoolState(poolAddress, options);
 
     return SqrtPriceMath.sqrtPriceX64ToPrice(
       new BN(pool.sqrtPriceX64.toString()),
       pool.mintDecimals0,
       pool.mintDecimals1
     );
+  }
+
+  /**
+   * Validates pool price against market price from REST API
+   *
+   * Why this matters: On-chain pool state can become stale between blocks or lag
+   * behind market prices due to arbitrage delays. Comparing against the REST API
+   * helps detect:
+   * - Stale pool data (price hasn't updated recently)
+   * - Arbitrage opportunities (on-chain price differs from market)
+   * - Potential MEV risks (large price discrepancies)
+   *
+   * This uses the enhanced PriceApiClient with:
+   * - Automatic retry on failures
+   * - Concurrency control
+   * - Abort signal support
+   * - Staleness detection
+   *
+   * @param poolAddress - Pool to validate
+   * @param opts - Optional configuration
+   * @param opts.signal - AbortSignal to cancel the request
+   * @param opts.maxDivergence - Maximum acceptable price divergence (0-1, default: 0.05 = 5%)
+   * @returns Validation result with price comparison
+   *
+   * @throws {Error} If priceApiConfig is not configured
+   *
+   * @example
+   * ```typescript
+   * const validation = await swapManager.validatePoolPrice(poolAddress, {
+   *   maxDivergence: 0.02 // 2% tolerance
+   * });
+   *
+   * if (!validation.isValid) {
+   *   console.warn('Pool price diverges from market:', validation);
+   *   // Maybe increase slippage or wait for arbitrage
+   * }
+   * ```
+   */
+  async validatePoolPrice(
+    poolAddress: Address,
+    opts?: {
+      signal?: AbortSignal;
+      maxDivergence?: number;
+    }
+  ): Promise<{
+    isValid: boolean;
+    onChainPrice: Decimal;
+    marketPrice?: Decimal;
+    divergence?: number;
+    divergencePercent?: number;
+    warning?: string;
+  }> {
+    if (!this.priceApiClient) {
+      throw new Error(
+        "Price validation requires priceApiConfig to be set in SwapManagerConfig"
+      );
+    }
+
+    const maxDivergence = opts?.maxDivergence ?? 0.05; // 5% default
+
+    // Get on-chain price
+    const onChainPrice = await this.getCurrentPrice(poolAddress);
+
+    try {
+      // Fetch market price from REST API with enhanced features
+      const priceData = await this.priceApiClient.getPrice(poolAddress, {
+        signal: opts?.signal,
+      });
+
+      if (!priceData) {
+        return {
+          isValid: true, // Assume valid if no market data available
+          onChainPrice,
+          warning: "No market price data available for comparison",
+        };
+      }
+
+      const marketPrice = priceData.price;
+      const divergence = marketPrice.minus(onChainPrice).abs();
+      const divergencePercent = divergence.div(onChainPrice).toNumber();
+
+      const isValid = divergencePercent <= maxDivergence;
+
+      return {
+        isValid,
+        onChainPrice,
+        marketPrice,
+        divergence: divergence.toNumber(),
+        divergencePercent,
+        warning: isValid
+          ? undefined
+          : `Price divergence (${(divergencePercent * 100).toFixed(2)}%) exceeds threshold (${(maxDivergence * 100).toFixed(2)}%)`,
+      };
+    } catch (error) {
+      this.log("warn", `Failed to fetch market price for validation: ${error}`);
+
+      // Don't fail the whole operation if price API is down
+      return {
+        isValid: true,
+        onChainPrice,
+        warning: `Price validation unavailable: ${error instanceof Error ? error.message : "Unknown error"}`,
+      };
+    }
+  }
+
+  /**
+   * Gets swap quote with optional market price validation
+   *
+   * Enhanced version of getSwapQuote that validates pool price against market
+   * prices when enablePriceValidation is enabled in config.
+   *
+   * @param poolAddress - Pool address
+   * @param params - Swap parameters
+   * @param opts - Optional configuration
+   * @param opts.signal - AbortSignal to cancel the request
+   * @param opts.skipValidation - Skip validation even if enabled (for performance)
+   * @returns Swap quote result with optional validation info
+   */
+  async getValidatedSwapQuote(
+    poolAddress: Address,
+    params: Omit<SwapParams, "wallet"> & {
+      tokenIn: Address;
+      tokenOut: Address;
+    },
+    opts?: {
+      signal?: AbortSignal;
+      skipValidation?: boolean;
+    }
+  ): Promise<{
+    quote: SwapQuoteResult;
+    validation?: {
+      isValid: boolean;
+      onChainPrice: Decimal;
+      marketPrice?: Decimal;
+      divergencePercent?: number;
+      warning?: string;
+    };
+  }> {
+    // Get the standard quote
+    const quote = await this.getSwapQuote(poolAddress, params);
+
+    // Optionally validate price
+    if (
+      !opts?.skipValidation &&
+      this.managerConfig?.enablePriceValidation &&
+      this.priceApiClient
+    ) {
+      try {
+        const validation = await this.validatePoolPrice(poolAddress, {
+          signal: opts?.signal,
+        });
+
+        return { quote, validation };
+      } catch (error) {
+        this.log(
+          "warn",
+          `Price validation failed, returning quote without validation: ${error}`
+        );
+      }
+    }
+
+    return { quote };
   }
 }
