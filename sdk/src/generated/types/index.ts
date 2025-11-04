@@ -6,6 +6,7 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from './closePositionEvent';
 export * from './collectPersonalFeeEvent';
 export * from './collectProtocolFeeEvent';
 export * from './configChangeEvent';

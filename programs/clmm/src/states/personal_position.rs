@@ -282,7 +282,7 @@ pub struct DecreaseLiquidityEvent {
     pub decrease_amount_0: u64,
     /// The amount of token_1 that was paid for the decrease in liquidity
     pub decrease_amount_1: u64,
-    // The amount of token_0 fee
+    /// The amount of token_0 fee
     pub fee_amount_0: u64,
     /// The amount of token_1 fee
     pub fee_amount_1: u64,
@@ -292,6 +292,12 @@ pub struct DecreaseLiquidityEvent {
     pub transfer_fee_0: u64,
     /// The amount of token_1 transfer fee
     pub transfer_fee_1: u64,
+}
+
+#[event]
+#[cfg_attr(feature = "client", derive(Debug))]
+pub struct ClosePositionEvent {
+    pub position_key: Pubkey
 }
 
 /// Emitted when liquidity decreased or increase.
