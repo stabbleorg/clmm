@@ -102,5 +102,8 @@ pub fn close_position<'a, 'b, 'c, 'info>(
             &[&ctx.accounts.personal_position.seeds()],
         )?;
     }
+    emit!(ClosePositionEvent {
+        position_key: ctx.accounts.personal_position.key()
+    });
     Ok(())
 }

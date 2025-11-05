@@ -34,6 +34,7 @@ export type DecreaseLiquidityEvent = {
   decreaseAmount0: bigint;
   /** The amount of token_1 that was paid for the decrease in liquidity */
   decreaseAmount1: bigint;
+  /** The amount of token_0 fee */
   feeAmount0: bigint;
   /** The amount of token_1 fee */
   feeAmount1: bigint;
@@ -54,6 +55,7 @@ export type DecreaseLiquidityEventArgs = {
   decreaseAmount0: number | bigint;
   /** The amount of token_1 that was paid for the decrease in liquidity */
   decreaseAmount1: number | bigint;
+  /** The amount of token_0 fee */
   feeAmount0: number | bigint;
   /** The amount of token_1 fee */
   feeAmount1: number | bigint;

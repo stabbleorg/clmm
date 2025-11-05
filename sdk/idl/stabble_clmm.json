@@ -2280,6 +2280,19 @@
   ],
   "events": [
     {
+      "name": "ClosePositionEvent",
+      "discriminator": [
+        198,
+        217,
+        115,
+        95,
+        191,
+        120,
+        142,
+        137
+      ]
+    },
+    {
       "name": "CollectPersonalFeeEvent",
       "discriminator": [
         166,
@@ -2726,6 +2739,18 @@
       }
     },
     {
+      "name": "ClosePositionEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position_key",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
       "name": "CollectPersonalFeeEvent",
       "docs": [
         "Emitted when tokens are collected for a position"
@@ -2989,6 +3014,9 @@
           },
           {
             "name": "fee_amount_0",
+            "docs": [
+              "The amount of token_0 fee"
+            ],
             "type": "u64"
           },
           {
