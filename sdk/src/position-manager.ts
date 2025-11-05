@@ -598,17 +598,50 @@ export class PositionManager {
 
   /**
    * Make close position instructions
+   * Automatically handles removing remaining liquidity and collecting fees/rewards before closing
    * @param params - Close position parameters
    * @returns Instruction result following established pattern
    */
   async makeClosePositionInstructions(params: {
     ownerPosition: PersonalPositionState;
+    poolState: Account<PoolState, Address>;
     ownerInfo: {
       wallet: TransactionSigner;
+      tokenAccountA: Address;
+      tokenAccountB: Address;
     };
   }): Promise<MakeInstructionResult<{}>> {
-    const { ownerPosition, ownerInfo } = params;
+    const { ownerPosition, poolState, ownerInfo } = params;
 
+    const instructions: Instruction[] = [];
+    const instructionTypes: string[] = [];
+
+    // If there's remaining liquidity, fees, or rewards, decrease liquidity to 0 first
+    // This will automatically collect all fees and rewards
+    const hasRemainingLiquidity = ownerPosition.liquidity > BigInt(0);
+    const hasFeesOwed =
+      ownerPosition.tokenFeesOwed0 > BigInt(0) ||
+      ownerPosition.tokenFeesOwed1 > BigInt(0);
+    const hasRewardsOwed = ownerPosition.rewardInfos.some(
+      (reward) => reward.rewardAmountOwed > BigInt(0),
+    );
+
+    if (hasRemainingLiquidity || hasFeesOwed || hasRewardsOwed) {
+      // Decrease all remaining liquidity (this will collect fees and rewards automatically)
+      const decreaseResult = await this.makeDecreaseLiquidityV2Instructions({
+        ownerPosition,
+        poolState,
+        ownerInfo,
+        liquidity: ownerPosition.liquidity,
+        amountMinA: BigInt(0), // Accept any amount when closing
+        amountMinB: BigInt(0),
+      });
+
+      instructions.push(...decreaseResult.instructions);
+      instructionTypes.push(...decreaseResult.instructionTypes);
+    }
+
+    // Now close the position
     const [personalPosition] = await PdaUtils.getPositionStatePda(
       ownerPosition.nftMint,
     );
@@ -618,7 +651,7 @@ export class PositionManager {
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
-    const instruction = getClosePositionInstruction({
+    const closeInstruction = getClosePositionInstruction({
       nftOwner: ownerInfo.wallet,
       positionNftMint: ownerPosition.nftMint,
       positionNftAccount,
@@ -626,10 +659,13 @@ export class PositionManager {
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
+    instructions.push(closeInstruction);
+    instructionTypes.push("ClosePosition");
+
     return {
-      instructions: [instruction],
+      instructions,
       signers: [],
-      instructionTypes: ["ClosePosition"],
+      instructionTypes,
       address: { positionNftAccount, personalPosition },
       lookupTableAddress: [],
     };
