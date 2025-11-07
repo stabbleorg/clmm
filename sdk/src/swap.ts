@@ -207,6 +207,21 @@ export class SwapMathEngine {
       poolAddress,
     } = params;
 
+    // Input validation
+    if (amountIn.lte(new BN(0))) {
+      throw new ClmmError(
+        ClmmErrorCode.SWAP_AMOUNT_CANNOT_BE_ZERO,
+        "Swap amount must be greater than zero"
+      );
+    }
+
+    if (slippageTolerance < 0 || slippageTolerance > 1) {
+      throw new ClmmError(
+        ClmmErrorCode.PRICE_SLIPPAGE,
+        `Slippage tolerance must be between 0 and 1, got ${slippageTolerance}`
+      );
+    }
+
     const liquidity = new BN(pool.liquidity.toString());
     const sqrtPriceCurrentX64 = new BN(pool.sqrtPriceX64.toString());
     const feeRate = ammConfig.tradeFeeRate; // in PPM
@@ -555,8 +570,7 @@ export interface SwapManagerConfig {
    * This avoids exposing RPC URIs and handles rate limiting centrally.
    *
    * Configuration:
-   * - baseUrl: 'https://mclmm-api.stabble.org' for production
-   * - baseUrl: 'https://dev-mclmm-api.stabble.org' for development
+   * - baseUrl
    * - timeout: Optional request timeout (default: 5000ms)
    *
    * When enabled, provides:
@@ -565,10 +579,7 @@ export interface SwapManagerConfig {
    * - Batch price fetching for multi-pool operations
    * - Automatic retry with concurrency control
    */
-  priceApiConfig?: {
-    baseUrl: string;
-    timeout?: number;
-  };
+  priceApiConfig?: PriceApiConfig;
   /**
    * Enable market price validation before swaps (requires priceApiConfig)
    *
@@ -680,7 +691,7 @@ export class SwapManager {
   ): void {
     const logger = this.config.logger;
     if (logger && logger[level]) {
-      logger[level](message, ...args);
+      logger[level]!(message, ...args);
     } else if (level === "error" || level === "warn") {
       console[level](`[SwapManager] ${message}`, ...args);
     }

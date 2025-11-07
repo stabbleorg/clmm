@@ -6,6 +6,7 @@ target
 node_modules
 test-ledger
 .yarn
+package-lock.json
 
 lib
 target
@@ -14,3 +15,8 @@ target
 KeyPairs
 .keypair
 .env
+
+*/coverage/
+
+# E2E test state
+.devnet-test-state.json

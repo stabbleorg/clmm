@@ -45,14 +45,20 @@ export type PriceResult =
 
 /**
  * Raw API response format
- * Adjust this interface based on actual API response structure
+ * Based on actual mclmm-api.stabble.org response structure
  */
 interface PriceApiResponse {
   [address: string]: {
-    price: string | number;
-    timestamp?: number;
-    volume24h?: string | number;
+    address: string;
+    usdPrice: string | number;
+    name?: string;
+    symbol?: string;
+    decimals?: number;
     priceChange24h?: string | number;
+    isVerified?: boolean;
+    image?: string;
+    updatedAt: number; // milliseconds since epoch
+    tags?: string[];
   };
 }
 
@@ -522,8 +528,8 @@ export class PriceApiClient {
       }
 
       try {
-        // Parse price with Decimal for precision
-        const price = new Decimal(data.price.toString());
+        // Parse price with Decimal for precision (API returns usdPrice)
+        const price = new Decimal(data.usdPrice.toString());
 
         // Validate price is positive and finite
         if (!price.isFinite() || price.lte(0)) {
@@ -534,8 +540,8 @@ export class PriceApiClient {
           continue;
         }
 
-        // Handle timestamp - validate and warn if missing or stale
-        const timestamp = data.timestamp ?? NaN;
+        // Handle timestamp - API uses updatedAt field
+        const timestamp = data.updatedAt ?? NaN;
         if (!Number.isFinite(timestamp)) {
           this.log(
             "warn",
@@ -552,8 +558,7 @@ export class PriceApiClient {
           address,
           price,
           timestamp: Number.isFinite(timestamp) ? timestamp : now,
-          volume24h:
-            data.volume24h !== undefined ? Number(data.volume24h) : undefined,
+          volume24h: undefined, // API doesn't provide 24h volume currently
           priceChange24h:
             data.priceChange24h !== undefined
               ? Number(data.priceChange24h)
