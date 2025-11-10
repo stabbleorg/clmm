@@ -27,10 +27,10 @@ import type {
 } from "./types";
 import { ClmmError, ClmmErrorCode } from "./types";
 import {
-  getCreateAssociatedTokenInstruction,
   getSyncNativeInstruction,
   findAssociatedTokenPda,
   TOKEN_PROGRAM_ADDRESS,
+  getCreateAssociatedTokenIdempotentInstruction,
 } from "@solana-program/token";
 import {
   PoolUtils,
@@ -56,7 +56,7 @@ export class PositionManager {
   }): Instruction[] {
     const { payer, ata, owner, amount } = params;
     return [
-      getCreateAssociatedTokenInstruction({
+      getCreateAssociatedTokenIdempotentInstruction({
         payer,
         ata,
         owner,
@@ -309,7 +309,7 @@ export class PositionManager {
     const remAccounts: AccountMeta[] = extBitmapAccount
       ? [{ address: extBitmapAccount[0], role: AccountRole.WRITABLE }]
       : [];
-    
+
     let wrapSolInstructions: Instruction[] = [];
 
     if (poolAccount.data.tokenMint0.toString() === NATIVE_MINT.toString()) {
@@ -317,14 +317,16 @@ export class PositionManager {
         payer: ownerInfo.wallet,
         ata: ownerInfo.tokenAccountA,
         owner: ownerInfo.wallet.address,
-        amount: baseAmount,
+        amount: amount0Max,
       });
-    } else if (poolAccount.data.tokenMint1.toString() === NATIVE_MINT.toString()) {
+    } else if (
+      poolAccount.data.tokenMint1.toString() === NATIVE_MINT.toString()
+    ) {
       wrapSolInstructions = this.buildWrapSolInstructions({
         payer: ownerInfo.wallet,
         ata: ownerInfo.tokenAccountB,
         owner: ownerInfo.wallet.address,
-        amount: baseAmount,
+        amount: amount1Max,
       });
     }
 
@@ -360,7 +362,7 @@ export class PositionManager {
     };
 
     return {
-      instructions: [...wrapSolInstructions,ixWithRemAccounts],
+      instructions: [...wrapSolInstructions, ixWithRemAccounts],
       signers,
       instructionTypes: ["OpenPositionV2"],
       address: {
