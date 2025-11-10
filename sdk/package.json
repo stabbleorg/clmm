@@ -36,11 +36,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:unit": "jest --testPathPattern=unit",
-    "test:integration": "jest --testPathPattern=integration",
-    "test:e2e:devnet-pool": "jest --testPathPattern=e2e/devnet-pool-creation",
-    "test:e2e:devnet-swap": "jest --testPathPattern=e2e/devnet-swap",
-    "test:e2e:devnet-errors": "jest --testPathPattern=e2e/devnet-errors",
-    "test:e2e:devnet": "jest --testPathPattern=e2e"
+    "test:integration": "jest --testPathPattern=integration"
   },
   "dependencies": {
     "@codama/nodes-from-anchor": "^1.2.9",
