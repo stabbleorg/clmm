@@ -1045,6 +1045,7 @@ export class SwapManager {
    * @param params.tokenOut - Address of the output token
    * @param params.amountIn - Amount of input token to swap (in base units)
    * @param params.slippageTolerance - Optional slippage tolerance (0-1, default: 0.01 = 1%)
+   * @param params.tickArrayCount - Optional override for number of tick arrays to fetch
    * @param options - Optional fetch configuration
    * @param options.signal - AbortSignal to cancel the request if needed
    * @param options.allowStale - Return stale data immediately and refresh in background
@@ -1074,6 +1075,7 @@ export class SwapManager {
     params: Omit<SwapParams, "wallet"> & {
       tokenIn: Address;
       tokenOut: Address;
+      tickArrayCount?: number; // Optional override
     },
     options?: {
       signal?: AbortSignal;
@@ -1085,6 +1087,7 @@ export class SwapManager {
       tokenOut,
       amountIn,
       slippageTolerance = DEFAULT_SLIPPAGE_TOLERANCE,
+      tickArrayCount,
     } = params;
 
     if (!isValidSlippage(slippageTolerance)) {
@@ -1125,31 +1128,78 @@ export class SwapManager {
       );
     }
 
-    const tickArrayCache = await this.fetchTickArraysForSwap(
-      poolAddress,
-      pool,
-      zeroForOne,
-      amountIn
-    );
+    try {
+      const tickArrayCache = await this.fetchTickArraysForSwap(
+        poolAddress,
+        pool,
+        zeroForOne,
+        amountIn,
+        tickArrayCount // Pass through the override
+      );
 
-    return this.mathEngine.calculateAccurateSwap({
-      pool,
-      ammConfig,
-      amountIn,
-      zeroForOne,
-      slippageTolerance,
-      poolAddress,
-      tickArrayCache,
-    });
+      return await this.mathEngine.calculateAccurateSwap({
+        pool,
+        ammConfig,
+        amountIn,
+        zeroForOne,
+        slippageTolerance,
+        poolAddress,
+        tickArrayCache,
+      });
+    } catch (error) {
+      // If accurate calculation fails due to missing tick arrays,
+      // fall back to simple calculation and return it as a DetailedSwapQuote
+      this.log(
+        "warn",
+        `Accurate swap calculation failed, falling back to simple calculation: ${error}`
+      );
+
+      const simpleQuote = await this.mathEngine.calculateSimpleSwap({
+        pool,
+        ammConfig,
+        amountIn,
+        zeroForOne,
+        slippageTolerance,
+        poolAddress,
+      });
+
+      const priceBefore = SqrtPriceMath.sqrtPriceX64ToPrice(
+        new BN(pool.sqrtPriceX64.toString()),
+        pool.mintDecimals0,
+        pool.mintDecimals1
+      );
+
+      // Return simple quote formatted as DetailedSwapQuote
+      return {
+        ...simpleQuote,
+        crossedTicks: 0,
+        endPrice: priceBefore,
+        priceImpactBreakdown: {
+          fees: ammConfig.tradeFeeRate / FEE_RATE_DENOMINATOR_NUMBER,
+          slippage: Math.max(
+            0,
+            simpleQuote.priceImpact -
+              ammConfig.tradeFeeRate / FEE_RATE_DENOMINATOR_NUMBER
+          ),
+        },
+      };
+    }
   }
 
   private async fetchTickArraysForSwap(
     poolAddress: Address,
     pool: PoolState,
     zeroForOne: boolean,
-    amountIn: BN
+    amountIn: BN,
+    tickArrayCountOverride?: number
   ): Promise<{ [key: string]: Account<TickArrayState> }> {
-    const arrayCount = this.estimateTickArrayCount(pool, amountIn);
+    const arrayCount =
+      tickArrayCountOverride ?? this.estimateTickArrayCount(pool, amountIn);
+
+    this.log(
+      "debug",
+      `Fetching ${arrayCount} tick arrays for swap. Pool: ${poolAddress}, AmountIn: ${amountIn.toString()}, ZeroForOne: ${zeroForOne}`
+    );
 
     const tickArrayAddresses = await this.getRequiredTickArrays(
       poolAddress,
@@ -1159,17 +1209,75 @@ export class SwapManager {
       arrayCount
     );
 
-    // Wrap RPC call in retry logic
-    const tickArrays = await withRetry(() =>
-      fetchAllTickArrayState(this.config.rpc, tickArrayAddresses)
-    );
+    // Try to fetch all tick arrays, but handle the case where some don't exist
+    try {
+      // First, try fetching all arrays together (most efficient)
+      const tickArrays = await withRetry(() =>
+        fetchAllTickArrayState(this.config.rpc, tickArrayAddresses)
+      );
 
-    const cache: { [key: string]: Account<TickArrayState> } = {};
-    for (const ta of tickArrays) {
-      cache[ta.address] = ta;
+      const cache: { [key: string]: Account<TickArrayState> } = {};
+      for (const ta of tickArrays) {
+        cache[ta.address] = ta;
+      }
+
+      this.log(
+        "debug",
+        `Successfully fetched ${tickArrays.length} tick arrays`
+      );
+
+      return cache;
+    } catch (error) {
+      // If batch fetch fails, some tick arrays might not be initialized
+      // Try fetching them individually and skip the ones that don't exist
+      this.log(
+        "warn",
+        `Batch fetch failed, attempting individual fetch. Error: ${error}`
+      );
+
+      const cache: { [key: string]: Account<TickArrayState> } = {};
+      let successCount = 0;
+
+      for (const address of tickArrayAddresses) {
+        try {
+          const [tickArray] = await withRetry(() =>
+            fetchAllTickArrayState(this.config.rpc, [address])
+          );
+          if (tickArray) {
+            cache[tickArray.address] = tickArray;
+            successCount++;
+          }
+        } catch (individualError) {
+          // This tick array doesn't exist or isn't initialized - skip it
+          this.log(
+            "debug",
+            `Tick array ${address} not found or uninitialized, skipping`
+          );
+        }
+      }
+
+      this.log(
+        "info",
+        `Fetched ${successCount} out of ${arrayCount} requested tick arrays`
+      );
+
+      // If we got at least some tick arrays, return them
+      // The swap calculation will work with what we have
+      if (successCount > 0) {
+        return cache;
+      }
+
+      // If we couldn't fetch any tick arrays, throw a more specific error
+      this.log(
+        "error",
+        `No tick arrays found for pool ${poolAddress}. This pool may have very sparse liquidity.`
+      );
+      throw new ClmmError(
+        ClmmErrorCode.SWAP_SIMULATION_FAILED,
+        `No initialized tick arrays found. This pool may have very sparse liquidity or may not be properly initialized. Cannot perform accurate swap calculation.`,
+        { cause: error }
+      );
     }
-
-    return cache;
   }
 
   /**
@@ -1181,16 +1289,16 @@ export class SwapManager {
    * we'll cross without doing the calculation. Chicken-and-egg problem.
    *
    * Solution: Conservative estimation. We estimate based on swap size relative to
-   * liquidity, then add a safety buffer. Better to fetch 2 extra arrays (slight
+   * liquidity, then add a safety buffer. Better to fetch extra arrays (slight
    * performance cost) than to fetch too few and have the swap fail on-chain.
    *
-   * Why the +2 buffer: In sparse liquidity situations, the swap might skip over
+   * Why the +3 buffer: In sparse liquidity situations, the swap might skip over
    * initialized ticks faster than expected. The buffer ensures we have enough
    * arrays even in worst-case scenarios. Orca and Uniswap use similar buffers.
    *
-   * Why cap at 10: Prevents pathological cases (e.g., nearly empty pools) from
-   * fetching dozens of arrays. 10 arrays cover ~200 ticks, enough for even very
-   * large swaps in normal pools.
+   * Why cap at 20: Prevents pathological cases (e.g., nearly empty pools) from
+   * fetching dozens of arrays, while still covering very large swaps or sparse
+   * liquidity scenarios. 20 arrays cover ~400 ticks, enough for most edge cases.
    *
    * @param pool - Current pool state
    * @param amountIn - Amount being swapped
@@ -1199,43 +1307,46 @@ export class SwapManager {
   private estimateTickArrayCount(pool: PoolState, amountIn: BN): number {
     const liquidity = new BN(pool.liquidity.toString());
 
-    // Prevent division by zero
-    if (liquidity.eq(new BN(0))) {
-      return 5; // Conservative fallback for empty pools
+    // Prevent division by zero - use generous fallback for empty/low liquidity pools
+    if (liquidity.eq(new BN(0)) || liquidity.lt(new BN(1000))) {
+      return 10; // More generous fallback for low/empty liquidity pools
     }
 
     // Calculate rough impact as proportion of liquidity
     // Using 1000x multiplier to avoid precision loss
     const roughImpact = amountIn.mul(new BN(1000)).div(liquidity);
 
-    // Conservative estimates with safety buffer (+1 or +2 arrays)
-    // This prevents failures in sparse liquidity situations
+    // More generous estimates with larger safety buffer
+    // This prevents "Not enough initialized tick arrays" errors
     let baseArrays: number;
 
     if (roughImpact.lte(new BN(1))) {
       // Very small swap: < 0.1% of liquidity
-      baseArrays = 1;
+      baseArrays = 2;
     } else if (roughImpact.lte(new BN(10))) {
       // Small swap: 0.1% - 1% of liquidity
-      baseArrays = 2;
+      baseArrays = 4;
     } else if (roughImpact.lte(new BN(50))) {
       // Medium swap: 1% - 5% of liquidity
-      baseArrays = 3;
+      baseArrays = 6;
     } else if (roughImpact.lte(new BN(100))) {
       // Large swap: 5% - 10% of liquidity
-      baseArrays = 5;
+      baseArrays = 8;
+    } else if (roughImpact.lte(new BN(200))) {
+      // Very large swap: 10% - 20% of liquidity
+      baseArrays = 12;
     } else {
-      // Very large swap: > 10% of liquidity
-      baseArrays = 7;
+      // Extremely large swap: > 20% of liquidity
+      baseArrays = 15;
     }
 
-    // Add safety buffer: +2 arrays for sparse liquidity protection
-    // Orca and Uniswap use similar buffers
-    const withBuffer = baseArrays + 2;
+    // Add larger safety buffer: +3 arrays for sparse liquidity protection
+    // This is more conservative to prevent errors in edge cases
+    const withBuffer = baseArrays + 3;
 
-    // Cap at reasonable maximum (10 arrays = ~200 ticks worth)
-    // This prevents excessive RPC calls while still covering most swaps
-    return Math.min(withBuffer, 10);
+    // Cap at higher maximum (20 arrays = ~400 ticks worth)
+    // This prevents excessive RPC calls while still covering edge cases
+    return Math.min(withBuffer, 20);
   }
 
   private async getRequiredTickArrays(
