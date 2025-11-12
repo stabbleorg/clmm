@@ -281,7 +281,9 @@ export class TickQuery {
         : tickArrayStartTickIndex + this.tickCount(tickSpacing);
 
       if (!this.checkIsValidStartIndex(nextArrayStartIndex, tickSpacing)) {
-        throw new Error("Not enough initialized tick arrays");
+        throw new Error(
+          `Not enough initialized tick arrays. Attempted to access tick array at index ${nextArrayStartIndex} with tick spacing ${tickSpacing}. Direction: ${zeroForOne ? "zeroForOne" : "oneForZero"}`
+        );
       }
 
       tickArrayStartTickIndex = nextArrayStartIndex;
@@ -303,9 +305,10 @@ export class TickQuery {
     }
 
     if (nextTick === undefined) {
-      throw new Error("No valid tickArray cache");
+      throw new Error(
+        "No initialized tick found in the given direction. All tick arrays searched."
+      );
     }
-
     return { nextTick, tickArrayAddress, tickArrayStartTickIndex };
   }
 

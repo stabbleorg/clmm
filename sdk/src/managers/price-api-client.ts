@@ -1,13 +1,14 @@
 import axios, { AxiosInstance, AxiosError } from "axios";
 import type { Address } from "@solana/kit";
 import Decimal from "decimal.js";
+import { API_ENDPOINTS } from "../constants";
 
 /**
  * Configuration for the Price API client
  */
 export interface PriceApiConfig {
-  /** Base URL for the price API (e.g., 'https://mclmm-api.stabble.org' or 'https://dev-mclmm-api.stabble.org') */
-  baseUrl: string;
+  /** Base URL for the price API (defaults to production: API_ENDPOINTS.mainnet) */
+  baseUrl?: string;
   /** Request timeout in milliseconds (default: 5000ms) */
   timeout?: number;
   /** Logger for debugging and monitoring */
@@ -80,8 +81,14 @@ interface PriceApiResponse {
  *
  * @example
  * ```typescript
- * const client = new PriceApiClient({
- *   baseUrl: 'https://mclmm-api.stabble.org',
+ * import { API_ENDPOINTS } from '../constants';
+ *
+ * // Uses production API by default
+ * const client = new PriceApiClient();
+ *
+ * // Or configure explicitly for dev
+ * const devClient = new PriceApiClient({
+ *   baseUrl: API_ENDPOINTS.devnet,
  *   timeout: 5000
  * });
  *
@@ -115,11 +122,11 @@ export class PriceApiClient {
    */
   private static readonly MAX_CONCURRENT_CHUNKS = 2;
 
-  constructor(config: PriceApiConfig) {
+  constructor(config: PriceApiConfig = {}) {
     this.logger = config.logger;
 
     this.client = axios.create({
-      baseURL: config.baseUrl,
+      baseURL: config.baseUrl ?? API_ENDPOINTS.mainnet,
       timeout: config.timeout ?? 5000,
       headers: {
         "Content-Type": "application/json",
@@ -128,7 +135,7 @@ export class PriceApiClient {
 
     this.log(
       "debug",
-      `PriceApiClient initialized with baseUrl: ${config.baseUrl}`
+      `PriceApiClient initialized with baseUrl: ${config.baseUrl ?? API_ENDPOINTS.mainnet}`
     );
   }
 

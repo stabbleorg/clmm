@@ -6,16 +6,12 @@
  * - Mock PriceApiClient class
  * - Mock RPC for ClmmSdkConfig
  */
-
-import BN from "bn.js";
 import Decimal from "decimal.js";
 import type { Address, Rpc } from "@solana/kit";
 import type { PoolState, AmmConfig } from "../../generated";
 import {
   USDC_SOL_POOL,
-  USDC_USDT_POOL,
   DEFAULT_AMM_CONFIG,
-  STABLECOIN_AMM_CONFIG,
   TEST_ADDRESSES,
 } from "../fixtures/pool-states";
 

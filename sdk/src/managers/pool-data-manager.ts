@@ -18,14 +18,17 @@
  * - Comprehensive metrics for observability
  */
 
-import type { Address } from "@solana/kit";
+import { address, type Address } from "@solana/kit";
 import {
   fetchPoolState,
   fetchAmmConfig,
   type PoolState,
   type AmmConfig,
+  AMM_CONFIG_DISCRIMINATOR,
 } from "../generated";
 import type { ClmmSdkConfig } from "../types";
+import { ClmmConfigApi } from "../api/config";
+import type { ClmmApiConfig } from "../api";
 
 type Immutability = "freeze" | "clone" | "none";
 
@@ -51,6 +54,8 @@ export class PoolDataManager {
   private readonly maxEntries: number;
   private readonly immutability: Immutability;
   private readonly errorCacheTTL: number;
+  private readonly randomFn: () => number;
+  private readonly apiClient?: ClmmConfigApi;
 
   // In-flight request deduplication
   private inFlightPools = new Map<Address, Promise<PoolState>>();
@@ -77,8 +82,14 @@ export class PoolDataManager {
       maxEntries?: number;
       immutability?: Immutability;
       errorCacheTTL?: number;
+      randomFn?: () => number;
+      apiConfig?: ClmmApiConfig;
     }
   ) {
+    // Initialize API client if config provided (for fetching AMM configs)
+    if (options?.apiConfig) {
+      this.apiClient = new ClmmConfigApi(options.apiConfig);
+    }
     // Default 2 second cache TTL (per team spec: "2 seconds should be enough")
     // Why 2 seconds: Balances freshness with RPC efficiency for low-traffic apps
     // like app.stabble.org. More aggressive than traditional 5-10s caching but
@@ -91,8 +102,12 @@ export class PoolDataManager {
     // Default to freeze for zero-cost immutability that works with BigInt/BN
     this.immutability = options?.immutability ?? "freeze";
 
+    // Deterministic random function for testing (defaults to Math.random)
+    this.randomFn = options?.randomFn ?? Math.random;
+
     // Short error cache with jitter (250-500ms) to prevent repeated hammering on failures
-    this.errorCacheTTL = options?.errorCacheTTL ?? 250 + Math.random() * 250;
+    // Use deterministic jitter calculation for testability
+    this.errorCacheTTL = options?.errorCacheTTL ?? 250 + this.randomFn() * 250;
   }
 
   /**
@@ -277,11 +292,36 @@ export class PoolDataManager {
           throw new Error("Aborted");
         }
 
-        const ammConfigAccount = await fetchAmmConfig(
-          this.config.rpc,
-          ammConfigAddress
-        );
-        const ammConfig = ammConfigAccount.data;
+        // Prefer API over RPC for AMM config (static data, rarely changes)
+        let ammConfig: AmmConfig;
+        if (this.apiClient) {
+          const apiConfig =
+            await this.apiClient.getClmmConfig(ammConfigAddress);
+          if (!apiConfig) {
+            throw new Error(`AMM config not found in API: ${ammConfigAddress}`);
+          }
+          // Map ClmmConfig from API to AmmConfig structure
+          ammConfig = {
+            discriminator: AMM_CONFIG_DISCRIMINATOR, // AMM_CONFIG_DISCRIMINATOR
+            bump: 0, // Not provided by API. This field is only used for on-chain address derivation and is not accessed or required by the SDK; setting to 0 is safe as the SDK never reads or relies on this value.// Not provided by API. This field is only used for on-chain address derivation and is not accessed or required by the SDK; setting to 0 is safe as the SDK never reads or relies on this value.
+            index: apiConfig.index,
+            owner: address(apiConfig.owner),
+            protocolFeeRate: apiConfig.protocolFeeRate,
+            tradeFeeRate: apiConfig.tradeFeeRate,
+            tickSpacing: apiConfig.tickSpacing,
+            fundFeeRate: apiConfig.fundFeeRate,
+            paddingU32: 0,
+            fundOwner: address(apiConfig.fundOwner),
+            padding: [0n, 0n, 0n],
+          };
+        } else {
+          // Fallback to RPC if API client not configured
+          const ammConfigAccount = await fetchAmmConfig(
+            this.config.rpc,
+            ammConfigAddress
+          );
+          ammConfig = ammConfigAccount.data;
+        }
 
         // Record timestamp AFTER successful fetch
         const fetchCompleteTime = Date.now();

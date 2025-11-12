@@ -1237,14 +1237,13 @@ export class SwapMath {
       !state.sqrtPriceX64.eq(sqrtPriceLimitX64)
     ) {
       // Find next initialized tick
-      const { nextTick, tickArrayAddress, tickArrayStartTickIndex } =
-        await TickQuery.nextInitializedTick(
-          poolId,
-          tickArrayCache,
-          state.tick,
-          tickSpacing,
-          zeroForOne
-        );
+      const { nextTick } = await TickQuery.nextInitializedTick(
+        poolId,
+        tickArrayCache,
+        state.tick,
+        tickSpacing,
+        zeroForOne
+      );
 
       // Get sqrt price at next tick
       const sqrtPriceNextX64 = SqrtPriceMath.getSqrtPriceX64FromTick(

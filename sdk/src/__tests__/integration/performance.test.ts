@@ -13,11 +13,7 @@ import BN from "bn.js";
 import type { Address, Rpc } from "@solana/kit";
 import { SwapManager } from "../../swap";
 import type { ClmmSdkConfig } from "../../types";
-import {
-  USDC_SOL_POOL,
-  DEFAULT_AMM_CONFIG,
-  TEST_ADDRESSES,
-} from "../fixtures/pool-states";
+import { USDC_SOL_POOL, TEST_ADDRESSES } from "../fixtures/pool-states";
 import type { PoolState } from "../../generated/accounts";
 import { setupIntegrationMocks } from "../helpers/integration-mocks";
 
@@ -120,7 +116,7 @@ describe("Integration: Performance & Concurrency (v2)", () => {
     it("should handle cache with immutability (freeze strategy)", async () => {
       const pool = TEST_ADDRESSES.USDC_SOL_POOL as Address;
 
-      const quote1 = await manager.getSwapQuote(pool, {
+      await manager.getSwapQuote(pool, {
         tokenIn: TEST_ADDRESSES.USDC_MINT as Address,
         tokenOut: TEST_ADDRESSES.SOL_MINT as Address,
         amountIn: new BN(1_000_000),
@@ -233,9 +229,7 @@ describe("Integration: Performance & Concurrency (v2)", () => {
         })
       );
 
-      const start = Date.now();
       await Promise.all(promises);
-      const duration = Date.now() - start;
 
       // Should complete quickly due to caching
       expect(mockFetchPoolState).toHaveBeenCalledTimes(1);

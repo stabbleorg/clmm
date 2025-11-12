@@ -17,7 +17,6 @@ import type { ClmmSdkConfig, SwapParams } from "../../types";
 import {
   USDC_SOL_POOL,
   USDC_USDT_POOL,
-  DEFAULT_AMM_CONFIG,
   TEST_ADDRESSES,
 } from "../fixtures/pool-states";
 import {
@@ -322,7 +321,6 @@ describe("Integration: Complete Swap Flow (v2)", () => {
       // Get actual on-chain price from pool state (sqrtPrice calculation)
       // For USDC_SOL_POOL: This represents how many SOL tokens per USDC
       // The calculated price is ~0.1 (1 USDC = 0.1 SOL, or 1 SOL = 10 USDC)
-      const onChainPrice = new Decimal("0.1"); // Base price
 
       // Mock API price with 1.5% divergence (within 2% threshold)
       const mockPriceApi = MockPriceApiClient.mock.results[0].value;

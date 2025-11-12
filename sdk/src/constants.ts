@@ -150,7 +150,7 @@ export const PDA_SEEDS = {
 const STABBLE_CLMM_API_DEVNET = "https://dev-mclmm-api.stabble.org";
 const STABBLE_CLMM_API_MAINNET = "https://mclmm-api.stabble.org";
 
-export const API_ENDPONTS = {
+export const API_ENDPOINTS = {
   mainnet: STABBLE_CLMM_API_MAINNET,
   devnet: STABBLE_CLMM_API_DEVNET,
 };

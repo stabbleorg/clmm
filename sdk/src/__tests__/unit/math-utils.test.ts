@@ -1707,11 +1707,6 @@ describe("SwapMath.swapCompute", () => {
         poolId: POOL_ID,
       });
 
-      // Total fees should be split correctly
-      const totalCollectedFees = result.amountIn.sub(
-        result.amountOut.add(result.feeAmount)
-      );
-
       // Protocol fee should be ~20% of trading fee
       expect(result.protocolFee.gt(new BN(0))).toBe(true);
 

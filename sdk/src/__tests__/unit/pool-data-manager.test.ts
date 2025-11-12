@@ -21,7 +21,6 @@ import {
   USDC_SOL_POOL,
   USDC_USDT_POOL,
   DEFAULT_AMM_CONFIG,
-  STABLECOIN_AMM_CONFIG,
   TEST_ADDRESSES,
 } from "../fixtures/pool-states";
 
@@ -658,6 +657,245 @@ describe("PoolDataManager", () => {
         TEST_ADDRESSES.USDC_SOL_POOL as Address
       );
       expect(mockFetchPoolState).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ========================================
+  // SUITE 7: API-based AMM Config Fetching
+  // ========================================
+  describe("API-based AMM config fetching", () => {
+    // Mock ClmmConfigApi
+    const mockApiClient = {
+      getClmmConfig: jest.fn(),
+    };
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+
+    it("should fetch AMM config from API when apiConfig provided", async () => {
+      // Mock API response with ClmmConfig format
+      const apiResponse = {
+        tradeFeeRate: 3000,
+        index: 1,
+        fundFeeRate: 0,
+        tickSpacing: 60,
+        fundOwner: TEST_ADDRESSES.DEFAULT_CONFIG,
+        owner: TEST_ADDRESSES.DEFAULT_CONFIG,
+        address: TEST_ADDRESSES.DEFAULT_CONFIG,
+        protocolFeeRate: 12000,
+      };
+      mockApiClient.getClmmConfig.mockResolvedValue(apiResponse);
+
+      // Create manager with API config
+      const managerWithApi = new PoolDataManager(sdkConfig, {
+        apiConfig: { baseUrl: "https://api.test.com" },
+      });
+
+      // Mock the apiClient (inject it)
+      (managerWithApi as any).apiClient = mockApiClient;
+
+      // Fetch config
+      const config = await managerWithApi.getAmmConfig(
+        TEST_ADDRESSES.DEFAULT_CONFIG as Address
+      );
+
+      // Should use API, not RPC
+      expect(mockApiClient.getClmmConfig).toHaveBeenCalledWith(
+        TEST_ADDRESSES.DEFAULT_CONFIG
+      );
+      expect(mockFetchAmmConfig).not.toHaveBeenCalled();
+
+      // Should map fields correctly
+      expect(config.tradeFeeRate).toBe(3000);
+      expect(config.index).toBe(1);
+      expect(config.tickSpacing).toBe(60);
+      expect(config.protocolFeeRate).toBe(12000);
+      expect(config.fundFeeRate).toBe(0);
+
+      // Should have default values for fields not in API
+      expect(config.bump).toBe(0);
+      expect(config.paddingU32).toBe(0);
+      expect(config.padding).toEqual([0n, 0n, 0n]);
+      expect(config.discriminator).toEqual(
+        new Uint8Array([218, 244, 33, 104, 203, 203, 43, 111])
+      );
+    });
+
+    it("should fall back to RPC when API client not configured", async () => {
+      // Create manager without API config
+      const managerWithoutApi = new PoolDataManager(sdkConfig);
+
+      // Fetch config
+      await managerWithoutApi.getAmmConfig(
+        TEST_ADDRESSES.DEFAULT_CONFIG as Address
+      );
+
+      // Should use RPC fallback
+      expect(mockFetchAmmConfig).toHaveBeenCalledWith(
+        mockRpc,
+        TEST_ADDRESSES.DEFAULT_CONFIG
+      );
+      expect(mockApiClient.getClmmConfig).not.toHaveBeenCalled();
+    });
+
+    it("should fall back to RPC when API returns null", async () => {
+      // Mock API returning null (config not found)
+      mockApiClient.getClmmConfig.mockResolvedValue(null);
+
+      const managerWithApi = new PoolDataManager(sdkConfig, {
+        apiConfig: { baseUrl: "https://api.test.com" },
+      });
+      (managerWithApi as any).apiClient = mockApiClient;
+
+      // Should throw error about not found in API
+      await expect(
+        managerWithApi.getAmmConfig(TEST_ADDRESSES.DEFAULT_CONFIG as Address)
+      ).rejects.toThrow("AMM config not found in API");
+
+      expect(mockApiClient.getClmmConfig).toHaveBeenCalled();
+    });
+
+    it("should cache API-fetched configs same as RPC-fetched", async () => {
+      const apiResponse = {
+        tradeFeeRate: 3000,
+        index: 1,
+        fundFeeRate: 0,
+        tickSpacing: 60,
+        fundOwner: TEST_ADDRESSES.DEFAULT_CONFIG,
+        owner: TEST_ADDRESSES.DEFAULT_CONFIG,
+        address: TEST_ADDRESSES.DEFAULT_CONFIG,
+        protocolFeeRate: 12000,
+      };
+      mockApiClient.getClmmConfig.mockResolvedValue(apiResponse);
+
+      const managerWithApi = new PoolDataManager(sdkConfig);
+      (managerWithApi as any).apiClient = mockApiClient;
+
+      // First fetch
+      await managerWithApi.getAmmConfig(
+        TEST_ADDRESSES.DEFAULT_CONFIG as Address
+      );
+      expect(mockApiClient.getClmmConfig).toHaveBeenCalledTimes(1);
+
+      // Second fetch should use cache
+      await managerWithApi.getAmmConfig(
+        TEST_ADDRESSES.DEFAULT_CONFIG as Address
+      );
+      expect(mockApiClient.getClmmConfig).toHaveBeenCalledTimes(1); // Still 1
+    });
+
+    it("should handle API errors gracefully", async () => {
+      // Mock API throwing error
+      mockApiClient.getClmmConfig.mockRejectedValue(
+        new Error("API connection failed")
+      );
+
+      const managerWithApi = new PoolDataManager(sdkConfig);
+      (managerWithApi as any).apiClient = mockApiClient;
+
+      // Should propagate error
+      await expect(
+        managerWithApi.getAmmConfig(TEST_ADDRESSES.DEFAULT_CONFIG as Address)
+      ).rejects.toThrow("API connection failed");
+
+      // Should increment error metrics
+      const metrics = managerWithApi.getMetrics();
+      expect(metrics.config.errors).toBe(1);
+    });
+
+    it("should convert string addresses to Address type", async () => {
+      const apiResponse = {
+        tradeFeeRate: 3000,
+        index: 1,
+        fundFeeRate: 0,
+        tickSpacing: 60,
+        fundOwner: "DqbRF6YsyGuLUVs6Y1q64bdVrfe4ZcUUz1JRdoVNUJnm", // string
+        owner: "CdRZnLEEjvyaLRCkZa7APqH4u8v5z8gHJXXHqz5cN9Es", // string
+        address: TEST_ADDRESSES.DEFAULT_CONFIG,
+        protocolFeeRate: 12000,
+      };
+      mockApiClient.getClmmConfig.mockResolvedValue(apiResponse);
+
+      const managerWithApi = new PoolDataManager(sdkConfig);
+      (managerWithApi as any).apiClient = mockApiClient;
+
+      const config = await managerWithApi.getAmmConfig(
+        TEST_ADDRESSES.DEFAULT_CONFIG as Address
+      );
+
+      // Should have Address types (not string)
+      expect(typeof config.owner).toBe("string"); // Address is a branded string
+      expect(typeof config.fundOwner).toBe("string");
+      expect(config.owner).toBeTruthy();
+      expect(config.fundOwner).toBeTruthy();
+    });
+
+    it("should handle API config with all valid fee rates", async () => {
+      const apiResponse = {
+        tradeFeeRate: 10000, // 1%
+        index: 5,
+        fundFeeRate: 5000, // 0.5%
+        tickSpacing: 128,
+        fundOwner: TEST_ADDRESSES.DEFAULT_CONFIG,
+        owner: TEST_ADDRESSES.DEFAULT_CONFIG,
+        address: TEST_ADDRESSES.DEFAULT_CONFIG,
+        protocolFeeRate: 25000, // 2.5%
+      };
+      mockApiClient.getClmmConfig.mockResolvedValue(apiResponse);
+
+      const managerWithApi = new PoolDataManager(sdkConfig);
+      (managerWithApi as any).apiClient = mockApiClient;
+
+      const config = await managerWithApi.getAmmConfig(
+        TEST_ADDRESSES.DEFAULT_CONFIG as Address
+      );
+
+      // Should preserve all fee rates correctly
+      expect(config.tradeFeeRate).toBe(10000);
+      expect(config.fundFeeRate).toBe(5000);
+      expect(config.protocolFeeRate).toBe(25000);
+      expect(config.tickSpacing).toBe(128);
+      expect(config.index).toBe(5);
+    });
+
+    it("should handle concurrent API requests with deduplication", async () => {
+      let resolveApi: (value: any) => void;
+      const slowApiPromise = new Promise((resolve) => {
+        resolveApi = resolve;
+      });
+      mockApiClient.getClmmConfig.mockReturnValueOnce(slowApiPromise);
+
+      const managerWithApi = new PoolDataManager(sdkConfig);
+      (managerWithApi as any).apiClient = mockApiClient;
+
+      // Fire 3 concurrent requests
+      const promises = [
+        managerWithApi.getAmmConfig(TEST_ADDRESSES.DEFAULT_CONFIG as Address),
+        managerWithApi.getAmmConfig(TEST_ADDRESSES.DEFAULT_CONFIG as Address),
+        managerWithApi.getAmmConfig(TEST_ADDRESSES.DEFAULT_CONFIG as Address),
+      ];
+
+      // Resolve API
+      resolveApi!({
+        tradeFeeRate: 3000,
+        index: 1,
+        fundFeeRate: 0,
+        tickSpacing: 60,
+        fundOwner: TEST_ADDRESSES.DEFAULT_CONFIG,
+        owner: TEST_ADDRESSES.DEFAULT_CONFIG,
+        address: TEST_ADDRESSES.DEFAULT_CONFIG,
+        protocolFeeRate: 12000,
+      });
+
+      const results = await Promise.all(promises);
+
+      // Should only call API once (deduplication)
+      expect(mockApiClient.getClmmConfig).toHaveBeenCalledTimes(1);
+
+      // All results should be the same
+      expect(results[0]).toBe(results[1]);
+      expect(results[1]).toBe(results[2]);
     });
   });
 });

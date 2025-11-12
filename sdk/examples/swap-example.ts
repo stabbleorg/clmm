@@ -92,7 +92,7 @@ async function main() {
         address: "YourWalletAddressHere" as any,
       } as any;
 
-      const instruction = await swapManager.buildSwapInstruction(
+      await swapManager.buildSwapInstruction(
         poolAddress,
         wallet,
         {

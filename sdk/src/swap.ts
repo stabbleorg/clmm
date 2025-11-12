@@ -663,10 +663,12 @@ export class SwapManager {
     // - 2-second TTL for balance of freshness and RPC efficiency
     // - "freeze" immutability for zero-cost BigInt/BN safety
     // - Default error caching with jitter to prevent RPC hammering
+    // - API client for fetching AMM configs (static data, rarely changes)
     this.poolDataManager = new PoolDataManager(config, {
       cacheTTL: 2_000,
       immutability: "freeze", // Zero-cost, works with BigInt/BN
       maxEntries: 100,
+      apiConfig: config.apiConfig, // Use API for AMM config instead of RPC
     });
     this.mathEngine = new SwapMathEngine();
 
@@ -783,19 +785,66 @@ export class SwapManager {
   }
 
   /**
-   * Estimates compute units and calculates priority fees
+   * Estimates compute units and calculates priority fees for a swap transaction
    *
    * Why this exists: Solana's fee market is complex. Users need to:
    * 1. Set compute budget (too low = failure, too high = wasted CU)
    * 2. Set priority fee (too low = slow confirmation, too high = wasted SOL)
    *
    * Why three priority levels: Different users have different urgency needs.
-   * - Low: Batch operations where speed doesn't matter
-   * - Medium: Normal trades where reasonable speed is expected
-   * - High: Time-sensitive arbitrage or MEV protection
+   * - Low: Batch operations where speed doesn't matter (100 microLamports/CU)
+   * - Medium: Normal trades where reasonable speed is expected (1,000 microLamports/CU)
+   * - High: Time-sensitive arbitrage or MEV protection (10,000 microLamports/CU)
    *
    * Why these specific microLamport values: Derived from observing Solana fee markets.
    * These values provide reasonable service levels without overpaying.
+   *
+   * Priority fee calculation: `totalFee = (computeUnits × microLamportsPerCU) / 1,000,000`
+   * This converts from microLamports (1/1,000,000 of a lamport) to lamports.
+   *
+   * @param quote - Swap quote result containing estimated compute units
+   * @param priorityLevel - Priority level for transaction confirmation (default: "medium")
+   *   - "low": 100 microLamports/CU (~0.05-5 lamports for typical swaps)
+   *   - "medium": 1,000 microLamports/CU (~0.5-50 lamports for typical swaps)
+   *   - "high": 10,000 microLamports/CU (~5-500 lamports for typical swaps)
+   *
+   * @returns Object containing:
+   *   - computeUnits: Estimated compute units needed (50k base + 20k per hop)
+   *   - microLamportsPerCU: Price per compute unit in microLamports
+   *   - totalPriorityFeeLamports: Total priority fee in lamports
+   *
+   * @example
+   * ```typescript
+   * const quote = await swapManager.getSwapQuote(poolAddress, {
+   *   tokenIn: usdcAddress,
+   *   tokenOut: solAddress,
+   *   amountIn: new BN(1_000_000),
+   * });
+   *
+   * // Estimate with medium priority (default)
+   * const budget = swapManager.estimateComputeBudget(quote);
+   * console.log(`Compute units: ${budget.computeUnits}`);
+   * console.log(`Priority fee: ${budget.totalPriorityFeeLamports} lamports`);
+   *
+   * // High priority for time-sensitive trades
+   * const urgentBudget = swapManager.estimateComputeBudget(quote, "high");
+   *
+   * // Use in transaction
+   * import { ComputeBudgetProgram } from "@solana/web3.js";
+   *
+   * const tx = new Transaction()
+   *   .add(
+   *     ComputeBudgetProgram.setComputeUnitLimit({
+   *       units: budget.computeUnits
+   *     })
+   *   )
+   *   .add(
+   *     ComputeBudgetProgram.setComputeUnitPrice({
+   *       microLamports: budget.microLamportsPerCU
+   *     })
+   *   )
+   *   .add(swapInstruction);
+   * ```
    */
   estimateComputeBudget(
     quote: SwapQuoteResult,
@@ -886,6 +935,8 @@ export class SwapManager {
    * @param params.tokenOut - Address of the output token
    * @param params.amountIn - Amount of input token to swap (in base units)
    * @param params.slippageTolerance - Optional slippage tolerance (0-1, default: 0.01 = 1%)
+   * @param params.poolState - Optional: Pre-fetched pool state to avoid RPC call (optimization for frontends with API data)
+   * @param params.ammConfig - Optional: Pre-fetched AMM config to avoid RPC call
    * @param options - Optional fetch configuration
    * @param options.signal - AbortSignal to cancel the request if needed
    * @param options.allowStale - Return stale data immediately and refresh in background
@@ -898,12 +949,22 @@ export class SwapManager {
    *
    * @example
    * ```typescript
-   * // Basic usage
+   * // Basic usage (SDK fetches pool state via RPC)
    * const quote = await swapManager.getSwapQuote(poolAddress, {
    *   tokenIn: usdcAddress,
    *   tokenOut: solAddress,
    *   amountIn: new BN(1_000_000), // 1 USDC (6 decimals)
    *   slippageTolerance: 0.005 // 0.5%
+   * });
+   *
+   * // Optimized for frontend with API data (avoids redundant RPC calls)
+   * const poolData = await fetch('/api/pools/' + poolAddress).then(r => r.json());
+   * const quote = await swapManager.getSwapQuote(poolAddress, {
+   *   tokenIn: usdcAddress,
+   *   tokenOut: solAddress,
+   *   amountIn: new BN(1_000_000),
+   *   poolState: poolData.state, // Pass pre-fetched data
+   *   ammConfig: poolData.ammConfig
    * });
    *
    * // With abort signal for cancellable requests
@@ -935,6 +996,8 @@ export class SwapManager {
     params: Omit<SwapParams, "wallet"> & {
       tokenIn: Address;
       tokenOut: Address;
+      poolState?: PoolState;
+      ammConfig?: AmmConfig;
     },
     options?: {
       signal?: AbortSignal;
@@ -946,13 +1009,18 @@ export class SwapManager {
       tokenOut,
       amountIn,
       slippageTolerance = DEFAULT_SLIPPAGE_TOLERANCE,
+      poolState: providedPoolState,
+      ammConfig: providedAmmConfig,
     } = params;
 
-    // Use enhanced pool data manager with negative caching and deduplication
-    const pool = await this.poolDataManager.getPoolState(poolAddress, {
-      signal: options?.signal,
-      allowStale: options?.allowStale,
-    });
+    // Use provided pool state if available (optimization for frontend with API data),
+    // otherwise fetch from RPC (for bots, CLI tools, backend services)
+    const pool = providedPoolState
+      ? providedPoolState
+      : await this.poolDataManager.getPoolState(poolAddress, {
+          signal: options?.signal,
+          allowStale: options?.allowStale,
+        });
 
     const cacheKey = `${poolAddress}-${tokenIn}-${tokenOut}-${amountIn.toString()}-${slippageTolerance}-${pool.ammConfig}`;
 
@@ -989,11 +1057,13 @@ export class SwapManager {
       );
     }
 
-    // Use enhanced pool data manager (errors are automatically cached)
-    const ammConfig = await this.poolDataManager.getAmmConfig(pool.ammConfig, {
-      signal: options?.signal,
-      allowStale: options?.allowStale,
-    });
+    // Use provided AMM config if available, otherwise fetch from RPC
+    const ammConfig = providedAmmConfig
+      ? providedAmmConfig
+      : await this.poolDataManager.getAmmConfig(pool.ammConfig, {
+          signal: options?.signal,
+          allowStale: options?.allowStale,
+        });
 
     const quote = await this.mathEngine.calculateSimpleSwap({
       pool,

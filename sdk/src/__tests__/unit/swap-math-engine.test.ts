@@ -17,19 +17,11 @@ import { SwapMathEngine } from "../../swap";
 import {
   USDC_SOL_POOL,
   USDC_USDT_POOL,
-  BTC_ETH_POOL,
   DEFAULT_AMM_CONFIG,
   STABLECOIN_AMM_CONFIG,
   TEST_ADDRESSES,
-  createCustomPoolState,
 } from "../fixtures/pool-states";
-import {
-  CURRENT_TICK_ARRAY,
-  LOWER_TICK_ARRAY,
-  UPPER_TICK_ARRAY,
-  createMockTickArrayCacheForSwap,
-  createTickArrayCache,
-} from "../fixtures/tick-arrays";
+import { createMockTickArrayCacheForSwap } from "../fixtures/tick-arrays";
 import type { SwapCalculationParams, AccurateSwapParams } from "../../swap";
 import { MIN_SQRT_PRICE_X64, MAX_SQRT_PRICE_X64 } from "../../constants";
 

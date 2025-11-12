@@ -24,7 +24,6 @@ import { PriceApiClient } from "../../managers/price-api-client";
 import type { ClmmSdkConfig, SwapQuote, SwapParams } from "../../types";
 import {
   USDC_SOL_POOL,
-  USDC_USDT_POOL,
   DEFAULT_AMM_CONFIG,
   TEST_ADDRESSES,
 } from "../fixtures/pool-states";
@@ -548,7 +547,6 @@ describe("SwapManager", () => {
 
       it("should error if output is zero", async () => {
         // Mock getSwapQuote to return zero output
-        const originalGetQuote = swapManager.getSwapQuote.bind(swapManager);
         jest.spyOn(swapManager, "getSwapQuote").mockResolvedValueOnce({
           quote: {
             amountIn: new BN(1),
