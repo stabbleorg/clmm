@@ -34,6 +34,24 @@ export class ClmmConfigApi {
   }
 
   /**
+   * Fetch a single CLMM config by address
+   * @param address - The AMM config address
+   * @returns CLMM config information or null if not found
+   */
+  async getClmmConfig(address: string): Promise<ClmmConfig | null> {
+    try {
+      const response = await this.client.get<ClmmConfig>(
+        `/clmm-configs/${address}`
+      );
+
+      return response.data;
+    } catch (error) {
+      if (this.isNotFoundError(error)) return null;
+      throw this.handleApiError(error);
+    }
+  }
+
+  /**
    * Handle API errors and convert to Error
    * @param error - Error from axios
    * @returns Error with appropriate message
@@ -68,7 +86,7 @@ export class ClmmConfigApi {
     }
 
     return new Error(
-      `Unknown API error: ${error instanceof Error ? error.message : "Unknown error"}`,
+      `Unknown API error: ${error instanceof Error ? error.message : "Unknown error"}`
     );
   }
 

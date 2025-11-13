@@ -9,8 +9,16 @@ export type { InstructionResult } from "./clmm";
 // Manager classes for direct use
 export { PoolManager } from "./pool-manager";
 export { PositionManager } from "./position-manager";
-// NOTE: Disabled
-// export { SwapManager } from './swap';
+export { SwapManager, SwapQuoteResult } from "./swap";
+export type {
+  SwapManagerConfig,
+  DetailedSwapQuote,
+  DetailedPriceImpact,
+  SwapSimulation,
+} from "./swap";
+export { PoolDataManager } from "./managers/pool-data-manager";
+export { PriceApiClient } from "./managers/price-api-client";
+export type { PriceApiConfig, PriceData } from "./managers/price-api-client";
 // export { RewardsManager } from "./rewards";
 
 // Type definitions

@@ -22,7 +22,7 @@ import {
   type Address,
 } from "@solana/kit";
 import { ClmmError, ClmmErrorCode } from "../types";
-import { API_ENDPONTS } from "../constants";
+import { API_ENDPOINTS } from "../constants";
 
 /**
  * Validate that an address is not empty
@@ -32,12 +32,12 @@ import { API_ENDPONTS } from "../constants";
  */
 export function validateAddress(
   address: Address,
-  name: string = "address",
+  name: string = "address"
 ): void {
   if (!address || address.length === 0) {
     throw new ClmmError(
       ClmmErrorCode.POOL_NOT_FOUND,
-      `Invalid ${name}: address cannot be empty`,
+      `Invalid ${name}: address cannot be empty`
     );
   }
 }
@@ -52,7 +52,7 @@ export function validateAmount(amount: bigint, name: string = "amount"): void {
   if (amount <= 0n) {
     throw new ClmmError(
       ClmmErrorCode.ZERO_MINT_AMOUNT,
-      `Invalid ${name}: must be greater than 0`,
+      `Invalid ${name}: must be greater than 0`
     );
   }
 }
@@ -75,7 +75,7 @@ export function sleep(ms: number): Promise<void> {
 export function formatAmount(
   amount: bigint,
   decimals: number,
-  precision: number = 6,
+  precision: number = 6
 ): string {
   const divisor = BigInt(10 ** decimals);
   const quotient = amount / divisor;
@@ -107,7 +107,7 @@ export function formatAmount(
 export function approximatelyEqual(
   a: bigint,
   b: bigint,
-  tolerance: bigint = 1n,
+  tolerance: bigint = 1n
 ): boolean {
   const diff = a > b ? a - b : b - a;
   return diff <= tolerance;
@@ -123,7 +123,7 @@ export function approximatelyEqual(
 export async function retry<T>(
   fn: () => Promise<T>,
   maxRetries: number = 3,
-  initialDelay: number = 1000,
+  initialDelay: number = 1000
 ): Promise<T> {
   let lastError: Error | undefined;
 
@@ -144,7 +144,7 @@ export async function retry<T>(
 
   throw new ClmmError(
     ClmmErrorCode.TRANSACTION_FAILED,
-    `Operation failed after ${maxRetries + 1} attempts: ${lastError?.message || "Unknown error"}`,
+    `Operation failed after ${maxRetries + 1} attempts: ${lastError?.message || "Unknown error"}`
   );
 }
 
@@ -191,7 +191,7 @@ export function getFakeSigner(address: Address) {
     address,
     signAndSendTransactions: async (transactions, _config) => {
       return transactions.map(
-        () => new Uint8Array(64).fill(0) as SignatureBytes,
+        () => new Uint8Array(64).fill(0) as SignatureBytes
       );
     },
   } satisfies TransactionSendingSigner;
@@ -201,11 +201,11 @@ export function getFakeSigner(address: Address) {
  * A very brutal way to differentate between mainnet and devnet RPC
  */
 export function getApisFromEndpoint(
-  rpc: Rpc<SolanaRpcApiMainnet | SolanaRpcApiDevnet | SolanaRpcApiTestnet>,
+  rpc: Rpc<SolanaRpcApiMainnet | SolanaRpcApiDevnet | SolanaRpcApiTestnet>
 ) {
   if ("requestAirdrop" in rpc) {
-    return API_ENDPONTS.devnet;
+    return API_ENDPOINTS.devnet;
   }
 
-  return API_ENDPONTS.mainnet;
+  return API_ENDPOINTS.mainnet;
 }

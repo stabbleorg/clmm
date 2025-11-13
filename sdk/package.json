@@ -1,6 +1,6 @@
 {
   "name": "@stabbleorg/mclmm-sdk",
-  "version": "0.1.14",
+  "version": "0.2.0",
   "description": "SDK for Stabble's margin-enabled concentrated liquidity market maker",
   "main": "lib/index.js",
   "module": "lib/index.mjs",
@@ -31,15 +31,20 @@
     "generate-clients": "ts-node ./scripts/generate-clients.ts",
     "ts": "tsc --noEmit",
     "prepare:canary": "yarn build && npm version --prerelease --preid=canary",
-    "prepublishOnly": "echo \"Building before publish!\" && yarn build"
+    "prepublishOnly": "echo \"Building before publish!\" && yarn build",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:unit": "jest --testPathPattern=unit",
+    "test:integration": "jest --testPathPattern=integration"
   },
   "dependencies": {
     "@codama/nodes-from-anchor": "^1.2.9",
     "@codama/renderers-js": "^1.4.2",
     "@solana-program/system": "^0.9.0",
-    "@solana-program/token": "^0.6.0",
-    "@solana-program/token-2022": "^0.5.0",
-    "@solana/kit": "^3.0.3",
+    "@solana-program/token": "^0.7.0",
+    "@solana-program/token-2022": "^0.6.0",
+    "@solana/kit": "^4.0.0",
     "@solana/web3.js": "^1.98.4",
     "@types/bn.js": "^5.2.0",
     "assert": "^2.0.0",
@@ -52,7 +57,10 @@
   },
   "devDependencies": {
     "@types/invariant": "2.2.35",
+    "@types/jest": "^30.0.0",
     "@types/node": "^24.5.2",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.5",
     "ts-node": "^10.9.2",
     "tsup": "^8.0.2",
     "typedoc": "^0.25.7",

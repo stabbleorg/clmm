@@ -1,8 +1,58 @@
+/**
+ * @fileoverview
+ * Mathematical utilities for Concentrated Liquidity Market Maker (CLMM) operations.
+ *
+ * This module provides all the core mathematical functions needed for:
+ * - Price calculations and conversions
+ * - Liquidity amount calculations
+ * - Swap computations
+ * - Tick and price range mathematics
+ *
+ * ## Key Concepts
+ *
+ * ### X64 Fixed-Point Arithmetic
+ * All prices in the CLMM are represented as X64 fixed-point numbers,
+ * meaning they are scaled by 2^64 for precision. This allows for exact
+ * integer arithmetic while representing fractional values.
+ *
+ * ### Square Root Price
+ * Instead of storing price directly, we store √P × 2^64, where P is the
+ * price of token1 in terms of token0. This makes the math more efficient
+ * for liquidity calculations.
+ *
+ * ### Ticks
+ * Prices are discretized into ticks, where each tick represents a 0.01%
+ * (1 basis point) price movement. Tick i corresponds to price 1.0001^i.
+ *
+ * ## Module Organization
+ *
+ * - **MathUtils**: Low-level arithmetic (mul/div with rounding)
+ * - **SqrtPriceMath**: Price ↔ sqrt price ↔ tick conversions
+ * - **TickMath**: Tick spacing and alignment utilities
+ * - **LiquidityMath**: Token amount ↔ liquidity calculations
+ * - **SwapMath**: Core swap step computations
+ *
+ * ## Rust Source Mapping
+ *
+ * These implementations are direct ports from the Rust program:
+ * - `programs/clmm/src/libraries/full_math.rs` → MathUtils
+ * - `programs/clmm/src/libraries/sqrt_price_math.rs` → SqrtPriceMath
+ * - `programs/clmm/src/libraries/tick_math.rs` → TickMath
+ * - `programs/clmm/src/libraries/liquidity_math.rs` → LiquidityMath
+ * - `programs/clmm/src/libraries/swap_math.rs` → SwapMath
+ *
+ * @module utils/math
+ */
+
 import BN from "bn.js";
 import Decimal from "decimal.js";
+import type { Account, Address } from "@solana/kit";
+import type { TickArrayState } from "../generated";
+import { TickQuery } from "./tickQuery";
 
 import {
   BIT_PRECISION,
+  FEE_RATE_DENOMINATOR,
   LOG_B_2_X32,
   LOG_B_P_ERR_MARGIN_LOWER_X64,
   LOG_B_P_ERR_MARGIN_UPPER_X64,
@@ -20,6 +70,17 @@ import {
 } from "../constants";
 
 export class MathUtils {
+  /**
+   * Multiply two numbers and divide by a denominator, rounding up.
+   * Used for conservative amount calculations (favoring the protocol).
+   *
+   * Formula: ceil((a × b) / denominator)
+   *
+   * @param a - First multiplicand
+   * @param b - Second multiplicand
+   * @param denominator - Divisor
+   * @returns Result rounded up
+   */
   public static mulDivRoundingUp(a: BN, b: BN, denominator: BN): BN {
     const numerator = a.mul(b);
     let result = numerator.div(denominator);
@@ -29,6 +90,18 @@ export class MathUtils {
     return result;
   }
 
+  /**
+   * Multiply two numbers and divide by a denominator, rounding down (floor).
+   * Used for conservative amount calculations (favoring users).
+   *
+   * Formula: floor((a × b) / denominator)
+   *
+   * @param a - First multiplicand
+   * @param b - Second multiplicand
+   * @param denominator - Divisor
+   * @returns Result rounded down
+   * @throws Error if denominator is zero
+   */
   public static mulDivFloor(a: BN, b: BN, denominator: BN): BN {
     if (denominator.eq(ZERO)) {
       throw new Error("division by 0");
@@ -36,6 +109,18 @@ export class MathUtils {
     return a.mul(b).div(denominator);
   }
 
+  /**
+   * Multiply two numbers and divide by a denominator, rounding up (ceiling).
+   * Similar to mulDivRoundingUp but uses a different calculation method.
+   *
+   * Formula: ceil((a × b) / denominator) = floor((a × b + denominator - 1) / denominator)
+   *
+   * @param a - First multiplicand
+   * @param b - Second multiplicand
+   * @param denominator - Divisor
+   * @returns Result rounded up
+   * @throws Error if denominator is zero
+   */
   public static mulDivCeil(a: BN, b: BN, denominator: BN): BN {
     if (denominator.eq(ZERO)) {
       throw new Error("division by 0");
@@ -44,16 +129,41 @@ export class MathUtils {
     return numerator.div(denominator);
   }
 
+  /**
+   * Convert X64 fixed-point number to Decimal.
+   * X64 means the number is scaled by 2^64.
+   *
+   * @param num - X64 fixed-point number
+   * @param decimalPlaces - Optional decimal places to round to
+   * @returns Decimal representation
+   */
   public static x64ToDecimal(num: BN, decimalPlaces?: number): Decimal {
     return new Decimal(num.toString())
       .div(Decimal.pow(2, 64))
       .toDecimalPlaces(decimalPlaces);
   }
 
+  /**
+   * Convert Decimal to X64 fixed-point number.
+   * X64 means the number is scaled by 2^64.
+   *
+   * @param num - Decimal number
+   * @returns X64 fixed-point BN
+   */
   public static decimalToX64(num: Decimal): BN {
     return new BN(num.mul(Decimal.pow(2, 64)).floor().toFixed());
   }
 
+  /**
+   * Wrapping subtraction for U128 values (handles underflow).
+   * Used in certain CLMM calculations where wrapping arithmetic is needed.
+   *
+   * Formula: (n0 + 2^128 - n1) mod 2^128
+   *
+   * @param n0 - Minuend
+   * @param n1 - Subtrahend
+   * @returns Wrapped difference
+   */
   public static wrappingSubU128(n0: BN, n1: BN): BN {
     return n0.add(Q128).sub(n1).mod(Q128);
   }
@@ -80,7 +190,7 @@ export class SqrtPriceMath {
   public static sqrtPriceX64ToPrice(
     sqrtPriceX64: BN,
     decimalsA: number,
-    decimalsB: number,
+    decimalsB: number
   ): Decimal {
     return MathUtils.x64ToDecimal(sqrtPriceX64)
       .pow(2)
@@ -90,10 +200,10 @@ export class SqrtPriceMath {
   public static priceToSqrtPriceX64(
     price: Decimal,
     decimalsA: number,
-    decimalsB: number,
+    decimalsB: number
   ): BN {
     return MathUtils.decimalToX64(
-      price.mul(Decimal.pow(10, decimalsB - decimalsA)).sqrt(),
+      price.mul(Decimal.pow(10, decimalsB - decimalsA)).sqrt()
     );
   }
 
@@ -101,7 +211,7 @@ export class SqrtPriceMath {
     sqrtPriceX64: BN,
     liquidity: BN,
     amountIn: BN,
-    zeroForOne: boolean,
+    zeroForOne: boolean
   ): BN {
     if (!sqrtPriceX64.gt(ZERO)) {
       throw new Error("sqrtPriceX64 must greater than 0");
@@ -115,13 +225,13 @@ export class SqrtPriceMath {
           sqrtPriceX64,
           liquidity,
           amountIn,
-          true,
+          true
         )
       : this.getNextSqrtPriceFromTokenAmountBRoundingDown(
           sqrtPriceX64,
           liquidity,
           amountIn,
-          true,
+          true
         );
   }
 
@@ -129,7 +239,7 @@ export class SqrtPriceMath {
     sqrtPriceX64: BN,
     liquidity: BN,
     amountOut: BN,
-    zeroForOne: boolean,
+    zeroForOne: boolean
   ): BN {
     if (!sqrtPriceX64.gt(ZERO)) {
       throw new Error("sqrtPriceX64 must greater than 0");
@@ -143,13 +253,13 @@ export class SqrtPriceMath {
           sqrtPriceX64,
           liquidity,
           amountOut,
-          false,
+          false
         )
       : this.getNextSqrtPriceFromTokenAmountARoundingUp(
           sqrtPriceX64,
           liquidity,
           amountOut,
-          false,
+          false
         );
   }
 
@@ -157,7 +267,7 @@ export class SqrtPriceMath {
     sqrtPriceX64: BN,
     liquidity: BN,
     amount: BN,
-    add: boolean,
+    add: boolean
   ): BN {
     if (amount.eq(ZERO)) return sqrtPriceX64;
     const liquidityLeftShift = liquidity.shln(U64Resolution);
@@ -171,20 +281,20 @@ export class SqrtPriceMath {
       return MathUtils.mulDivRoundingUp(
         numerator1,
         ONE,
-        numerator1.div(sqrtPriceX64).add(amount),
+        numerator1.div(sqrtPriceX64).add(amount)
       );
     } else {
       const amountMulSqrtPrice = amount.mul(sqrtPriceX64);
       if (!liquidityLeftShift.gt(amountMulSqrtPrice)) {
         throw new Error(
-          "getNextSqrtPriceFromTokenAmountARoundingUp,liquidityLeftShift must gt amountMulSqrtPrice",
+          "getNextSqrtPriceFromTokenAmountARoundingUp,liquidityLeftShift must gt amountMulSqrtPrice"
         );
       }
       const denominator = liquidityLeftShift.sub(amountMulSqrtPrice);
       return MathUtils.mulDivCeil(
         liquidityLeftShift,
         sqrtPriceX64,
-        denominator,
+        denominator
       );
     }
   }
@@ -193,7 +303,7 @@ export class SqrtPriceMath {
     sqrtPriceX64: BN,
     liquidity: BN,
     amount: BN,
-    add: boolean,
+    add: boolean
   ): BN {
     const deltaY = amount.shln(U64Resolution);
     if (add) {
@@ -202,11 +312,11 @@ export class SqrtPriceMath {
       const amountDivLiquidity = MathUtils.mulDivRoundingUp(
         deltaY,
         ONE,
-        liquidity,
+        liquidity
       );
       if (!sqrtPriceX64.gt(amountDivLiquidity)) {
         throw new Error(
-          "getNextSqrtPriceFromTokenAmountBRoundingDown sqrtPriceX64 must gt amountDivLiquidity",
+          "getNextSqrtPriceFromTokenAmountBRoundingDown sqrtPriceX64 must gt amountDivLiquidity"
         );
       }
       return sqrtPriceX64.sub(amountDivLiquidity);
@@ -270,10 +380,10 @@ export class SqrtPriceMath {
   public static getTickFromPrice(
     price: Decimal,
     decimalsA: number,
-    decimalsB: number,
+    decimalsB: number
   ): number {
     return SqrtPriceMath.getTickFromSqrtPriceX64(
-      SqrtPriceMath.priceToSqrtPriceX64(price, decimalsA, decimalsB),
+      SqrtPriceMath.priceToSqrtPriceX64(price, decimalsA, decimalsB)
     );
   }
 
@@ -283,7 +393,7 @@ export class SqrtPriceMath {
       sqrtPriceX64.lt(MIN_SQRT_PRICE_X64)
     ) {
       throw new Error(
-        "Provided sqrtPrice is not within the supported sqrtPrice range.",
+        "Provided sqrtPrice is not within the supported sqrtPrice range."
       );
     }
 
@@ -315,12 +425,12 @@ export class SqrtPriceMath {
     const tickLow = signedRightShift(
       logbpX64.sub(new BN(LOG_B_P_ERR_MARGIN_LOWER_X64)),
       64,
-      128,
+      128
     ).toNumber();
     const tickHigh = signedRightShift(
       logbpX64.add(new BN(LOG_B_P_ERR_MARGIN_UPPER_X64)),
       64,
-      128,
+      128
     ).toNumber();
 
     if (tickLow == tickHigh) {
@@ -339,10 +449,10 @@ export class TickMath {
     price: Decimal,
     tickSpacing: number,
     mintDecimalsA: number,
-    mintDecimalsB: number,
+    mintDecimalsB: number
   ): number {
     const tick = SqrtPriceMath.getTickFromSqrtPriceX64(
-      SqrtPriceMath.priceToSqrtPriceX64(price, mintDecimalsA, mintDecimalsB),
+      SqrtPriceMath.priceToSqrtPriceX64(price, mintDecimalsA, mintDecimalsB)
     );
     let result = tick / tickSpacing;
     if (result < 0) {
@@ -357,79 +467,214 @@ export class TickMath {
     price: Decimal,
     tickSpacing: number,
     mintDecimalsA: number,
-    mintDecimalsB: number,
+    mintDecimalsB: number
   ): Decimal {
     const tick = TickMath.getTickWithPriceAndTickspacing(
       price,
       tickSpacing,
       mintDecimalsA,
-      mintDecimalsB,
+      mintDecimalsB
     );
     const sqrtPriceX64 = SqrtPriceMath.getSqrtPriceX64FromTick(tick);
     return SqrtPriceMath.sqrtPriceX64ToPrice(
       sqrtPriceX64,
       mintDecimalsA,
-      mintDecimalsB,
+      mintDecimalsB
     );
   }
 }
 
+/**
+ * LiquidityMath
+ *
+ * Implements core CLMM (Concentrated Liquidity Market Maker) mathematical functions
+ * for calculating token amounts from liquidity across price ranges.
+ *
+ * These functions are direct ports from the Rust implementation in:
+ * `programs/clmm/src/libraries/liquidity_math.rs`
+ *
+ * @remarks
+ * All prices use X64 fixed-point representation (scaled by 2^64).
+ * All calculations maintain precision using BN.js for arbitrary precision arithmetic.
+ */
+
+/**
+ * Asserts that a value fits within u64 bounds (0 to 2^64 - 1).
+ * This emulates Rust's u64 overflow checks in get_delta_amount_*_unsigned functions.
+ *
+ * @param x - Value to check
+ * @param context - Context string for error message
+ * @returns The value if it fits in u64
+ * @throws Error with "MaxTokenOverflow" if value exceeds u64::MAX
+ * @private
+ */
+function assertU64(x: BN, context: string): BN {
+  if (x.gt(MaxU64)) {
+    throw new Error(`MaxTokenOverflow: ${context}`);
+  }
+  return x;
+}
+
 export class LiquidityMath {
+  /**
+   * Adds a signed delta to a liquidity value.
+   *
+   * @param x - Current liquidity
+   * @param y - Delta to add (can be negative)
+   * @returns New liquidity value
+   */
   public static addDelta(x: BN, y: BN): BN {
     return x.add(y);
   }
 
+  /**
+   * Calculates the amount of token A (token0) for a given liquidity across a price range.
+   *
+   * This corresponds to `get_delta_amount_0_unsigned` in the Rust implementation.
+   *
+   * **Mathematical Formula:**
+   * ```
+   * Δx = L × (√P_upper - √P_lower) / (√P_upper × √P_lower)
+   * ```
+   *
+   * Where:
+   * - L = liquidity
+   * - √P_upper = sqrtPriceX64B (higher price boundary)
+   * - √P_lower = sqrtPriceX64A (lower price boundary)
+   *
+   * **Use Cases:**
+   * - Calculating token amounts when adding/removing liquidity
+   * - Computing swap amounts in the CLMM
+   * - Determining position values
+   *
+   * @param sqrtPriceX64A - Lower sqrt price boundary (X64 fixed-point)
+   * @param sqrtPriceX64B - Upper sqrt price boundary (X64 fixed-point)
+   * @param liquidity - Liquidity amount
+   * @param roundUp - If true, round up the result (used for amount_in calculations); if false, round down (used for amount_out)
+   * @returns Token A amount (unsigned integer)
+   *
+   * @throws Error if sqrtPriceX64A is not greater than 0
+   *
+   * @example
+   * ```typescript
+   * const sqrtPriceLower = new BN("1234567890");
+   * const sqrtPriceUpper = new BN("9876543210");
+   * const liquidity = new BN("1000000");
+   *
+   * // Calculate token A amount needed (round up for safety when depositing)
+   * const tokenAAmount = LiquidityMath.getTokenAmountAFromLiquidity(
+   *   sqrtPriceLower,
+   *   sqrtPriceUpper,
+   *   liquidity,
+   *   true
+   * );
+   * ```
+   */
   public static getTokenAmountAFromLiquidity(
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
     liquidity: BN,
-    roundUp: boolean,
+    roundUp: boolean
   ): BN {
+    // Auto-swap to ensure sqrtPriceX64A < sqrtPriceX64B
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
       [sqrtPriceX64A, sqrtPriceX64B] = [sqrtPriceX64B, sqrtPriceX64A];
     }
 
     if (!sqrtPriceX64A.gt(ZERO)) {
-      throw new Error("sqrtPriceX64A must greater than 0");
+      throw new Error("sqrtPriceX64A must be greater than 0");
     }
 
-    const numerator1 = liquidity.ushln(U64Resolution);
+    // Formula: L × (√P_upper - √P_lower) / (√P_upper × √P_lower)
+    // Implemented as: (L << 64) × (√P_upper - √P_lower) / √P_upper / √P_lower
+    const numerator1 = liquidity.ushln(U64Resolution); // U64Resolution = 64
+
     const numerator2 = sqrtPriceX64B.sub(sqrtPriceX64A);
 
-    return roundUp
+    const result = roundUp
       ? MathUtils.mulDivRoundingUp(
           MathUtils.mulDivCeil(numerator1, numerator2, sqrtPriceX64B),
           ONE,
-          sqrtPriceX64A,
+          sqrtPriceX64A
         )
       : MathUtils.mulDivFloor(numerator1, numerator2, sqrtPriceX64B).div(
-          sqrtPriceX64A,
+          sqrtPriceX64A
         );
+
+    return assertU64(result, "getTokenAmountAFromLiquidity");
   }
 
+  /**
+   * Calculates the amount of token B (token1) for a given liquidity across a price range.
+   *
+   * This corresponds to `get_delta_amount_1_unsigned` in the Rust implementation.
+   *
+   * **Mathematical Formula:**
+   * ```
+   * Δy = L × (√P_upper - √P_lower) / Q64
+   * ```
+   *
+   * Where:
+   * - L = liquidity
+   * - √P_upper = sqrtPriceX64B (higher price boundary)
+   * - √P_lower = sqrtPriceX64A (lower price boundary)
+   * - Q64 = 2^64 (fixed-point scaling factor)
+   *
+   * **Use Cases:**
+   * - Calculating token amounts when adding/removing liquidity
+   * - Computing swap amounts in the CLMM
+   * - Determining position values
+   *
+   * @param sqrtPriceX64A - Lower sqrt price boundary (X64 fixed-point)
+   * @param sqrtPriceX64B - Upper sqrt price boundary (X64 fixed-point)
+   * @param liquidity - Liquidity amount
+   * @param roundUp - If true, round up the result (used for amount_in calculations); if false, round down (used for amount_out)
+   * @returns Token B amount (unsigned integer)
+   *
+   * @throws Error if sqrtPriceX64A is not greater than 0
+   *
+   * @example
+   * ```typescript
+   * const sqrtPriceLower = new BN("1234567890");
+   * const sqrtPriceUpper = new BN("9876543210");
+   * const liquidity = new BN("1000000");
+   *
+   * // Calculate token B amount needed (round up for safety when depositing)
+   * const tokenBAmount = LiquidityMath.getTokenAmountBFromLiquidity(
+   *   sqrtPriceLower,
+   *   sqrtPriceUpper,
+   *   liquidity,
+   *   true
+   * );
+   * ```
+   */
   public static getTokenAmountBFromLiquidity(
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
     liquidity: BN,
-    roundUp: boolean,
+    roundUp: boolean
   ): BN {
+    // Auto-swap to ensure sqrtPriceX64A < sqrtPriceX64B
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
       [sqrtPriceX64A, sqrtPriceX64B] = [sqrtPriceX64B, sqrtPriceX64A];
     }
     if (!sqrtPriceX64A.gt(ZERO)) {
-      throw new Error("sqrtPriceX64A must greater than 0");
+      throw new Error("sqrtPriceX64A must be greater than 0");
     }
 
-    return roundUp
+    // Formula: L × (√P_upper - √P_lower) / Q64
+    const result = roundUp
       ? MathUtils.mulDivCeil(liquidity, sqrtPriceX64B.sub(sqrtPriceX64A), Q64)
       : MathUtils.mulDivFloor(liquidity, sqrtPriceX64B.sub(sqrtPriceX64A), Q64);
+
+    return assertU64(result, "getTokenAmountBFromLiquidity");
   }
 
   public static getLiquidityFromTokenAmountA(
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
     amountA: BN,
-    roundUp: boolean,
+    roundUp: boolean
   ): BN {
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
       [sqrtPriceX64A, sqrtPriceX64B] = [sqrtPriceX64B, sqrtPriceX64A];
@@ -449,7 +694,7 @@ export class LiquidityMath {
   public static getLiquidityFromTokenAmountB(
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
-    amountB: BN,
+    amountB: BN
   ): BN {
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
       [sqrtPriceX64A, sqrtPriceX64B] = [sqrtPriceX64B, sqrtPriceX64A];
@@ -457,7 +702,7 @@ export class LiquidityMath {
     return MathUtils.mulDivFloor(
       amountB,
       MaxU64,
-      sqrtPriceX64B.sub(sqrtPriceX64A),
+      sqrtPriceX64B.sub(sqrtPriceX64A)
     );
   }
 
@@ -466,7 +711,7 @@ export class LiquidityMath {
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
     amountA: BN,
-    amountB: BN,
+    amountB: BN
   ): BN {
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
       [sqrtPriceX64A, sqrtPriceX64B] = [sqrtPriceX64B, sqrtPriceX64A];
@@ -477,26 +722,26 @@ export class LiquidityMath {
         sqrtPriceX64A,
         sqrtPriceX64B,
         amountA,
-        false,
+        false
       );
     } else if (sqrtPriceCurrentX64.lt(sqrtPriceX64B)) {
       const liquidity0 = LiquidityMath.getLiquidityFromTokenAmountA(
         sqrtPriceCurrentX64,
         sqrtPriceX64B,
         amountA,
-        false,
+        false
       );
       const liquidity1 = LiquidityMath.getLiquidityFromTokenAmountB(
         sqrtPriceX64A,
         sqrtPriceCurrentX64,
-        amountB,
+        amountB
       );
       return liquidity0.lt(liquidity1) ? liquidity0 : liquidity1;
     } else {
       return LiquidityMath.getLiquidityFromTokenAmountB(
         sqrtPriceX64A,
         sqrtPriceX64B,
-        amountB,
+        amountB
       );
     }
   }
@@ -506,7 +751,7 @@ export class LiquidityMath {
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
     liquidity: BN,
-    roundUp: boolean,
+    roundUp: boolean
   ): { amountA: BN; amountB: BN } {
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
       [sqrtPriceX64A, sqrtPriceX64B] = [sqrtPriceX64B, sqrtPriceX64A];
@@ -518,7 +763,7 @@ export class LiquidityMath {
           sqrtPriceX64A,
           sqrtPriceX64B,
           liquidity,
-          roundUp,
+          roundUp
         ),
         amountB: new BN(0),
       };
@@ -527,13 +772,13 @@ export class LiquidityMath {
         sqrtPriceCurrentX64,
         sqrtPriceX64B,
         liquidity,
-        roundUp,
+        roundUp
       );
       const amountB = LiquidityMath.getTokenAmountBFromLiquidity(
         sqrtPriceX64A,
         sqrtPriceCurrentX64,
         liquidity,
-        roundUp,
+        roundUp
       );
       return { amountA, amountB };
     } else {
@@ -543,7 +788,7 @@ export class LiquidityMath {
           sqrtPriceX64A,
           sqrtPriceX64B,
           liquidity,
-          roundUp,
+          roundUp
         ),
       };
     }
@@ -556,123 +801,68 @@ export class LiquidityMath {
     liquidity: BN,
     amountMax: boolean,
     roundUp: boolean,
-    amountSlippage: number,
+    amountSlippage: number
   ): { amountSlippageA: BN; amountSlippageB: BN } {
     const { amountA, amountB } = LiquidityMath.getAmountsFromLiquidity(
       sqrtPriceCurrentX64,
       sqrtPriceX64A,
       sqrtPriceX64B,
       liquidity,
-      roundUp,
+      roundUp
     );
     const coefficient = amountMax ? 1 + amountSlippage : 1 - amountSlippage;
 
     const amount0Slippage = new BN(
-      new Decimal(amountA.toString()).mul(coefficient).toFixed(0),
+      new Decimal(amountA.toString()).mul(coefficient).toFixed(0)
     );
     const amount1Slippage = new BN(
-      new Decimal(amountB.toString()).mul(coefficient).toFixed(0),
+      new Decimal(amountB.toString()).mul(coefficient).toFixed(0)
     );
     return {
       amountSlippageA: amount0Slippage,
       amountSlippageB: amount1Slippage,
     };
   }
-
-  // public static getAmountsOutFromLiquidity({
-  //   poolInfo,
-  //   tickLower,
-  //   tickUpper,
-  //   liquidity,
-  //   slippage,
-  //   add,
-  //   epochInfo,
-  //   amountAddFee,
-  // }: {
-  //   poolInfo: ApiV3PoolInfoConcentratedItem;
-  //   tickLower: number;
-  //   tickUpper: number;
-  //   liquidity: BN;
-  //   slippage: number;
-  //   add: boolean;
-  //
-  //   epochInfo: EpochInfo;
-  //   amountAddFee: boolean;
-  // }): ReturnTypeGetLiquidityAmountOut {
-  //   const sqrtPriceX64 = SqrtPriceMath.priceToSqrtPriceX64(
-  //     new Decimal(poolInfo.price),
-  //     poolInfo.mintA.decimals,
-  //     poolInfo.mintB.decimals,
-  //   );
-  //   const sqrtPriceX64A = SqrtPriceMath.getSqrtPriceX64FromTick(tickLower);
-  //   const sqrtPriceX64B = SqrtPriceMath.getSqrtPriceX64FromTick(tickUpper);
-  //
-  //   const coefficientRe = add ? 1 + slippage : 1 - slippage;
-  //
-  //   const amounts = LiquidityMath.getAmountsFromLiquidity(
-  //     sqrtPriceX64,
-  //     sqrtPriceX64A,
-  //     sqrtPriceX64B,
-  //     liquidity,
-  //     add,
-  //   );
-  //
-  //   const [amountA, amountB] = [
-  //     getTransferAmountFeeV2(
-  //       amounts.amountA,
-  //       poolInfo.mintA.extensions?.feeConfig,
-  //       epochInfo,
-  //       amountAddFee,
-  //     ),
-  //     getTransferAmountFeeV2(
-  //       amounts.amountB,
-  //       poolInfo.mintB.extensions?.feeConfig,
-  //       epochInfo,
-  //       amountAddFee,
-  //     ),
-  //   ];
-  //   const [amountSlippageA, amountSlippageB] = [
-  //     getTransferAmountFeeV2(
-  //       new BN(
-  //         new Decimal(amounts.amountA.toString()).mul(coefficientRe).toFixed(0),
-  //       ),
-  //       poolInfo.mintA.extensions?.feeConfig,
-  //       epochInfo,
-  //       amountAddFee,
-  //     ),
-  //     getTransferAmountFeeV2(
-  //       new BN(
-  //         new Decimal(amounts.amountB.toString()).mul(coefficientRe).toFixed(0),
-  //       ),
-  //       poolInfo.mintB.extensions?.feeConfig,
-  //       epochInfo,
-  //       amountAddFee,
-  //     ),
-  //   ];
-  //
-  //   return {
-  //     liquidity,
-  //     amountA,
-  //     amountB,
-  //     amountSlippageA,
-  //     amountSlippageB,
-  //     expirationTime: minExpirationTime(
-  //       amountA.expirationTime,
-  //       amountB.expirationTime,
-  //     ),
-  //   };
-  // }
 }
 
-// swap math
+/**
+ * SwapMath
+ *
+ * Implements core swap calculation logic for CLMM (Concentrated Liquidity Market Maker).
+ *
+ * These functions are direct ports from the Rust implementation in:
+ * `programs/clmm/src/libraries/swap_math.rs`
+ *
+ * @remarks
+ * The swap math handles the complex calculations needed to determine:
+ * - How much of the input token is consumed
+ * - How much of the output token is produced
+ * - How much fee is charged
+ * - What the new price will be after the swap
+ *
+ * All prices use X64 fixed-point representation (scaled by 2^64).
+ */
 
-// type SwapStep = {
-//   sqrtPriceX64Next: BN;
-//   amountIn: BN;
-//   amountOut: BN;
-//   feeAmount: BN;
-// };
+/**
+ * Result of a single swap step calculation.
+ *
+ * Corresponds to the `SwapStep` struct in the Rust implementation.
+ */
+export interface SwapStep {
+  /** The price after swapping the amount in/out, not to exceed the price target */
+  sqrtPriceNextX64: BN;
+  /** Amount of input token consumed in this step */
+  amountIn: BN;
+  /** Amount of output token produced in this step */
+  amountOut: BN;
+  /** Fee charged for this swap step */
+  feeAmount: BN;
+}
 
+/**
+ * Extended step computations interface used in full swap calculations.
+ * Includes additional state tracking beyond the basic SwapStep.
+ */
 export interface StepComputations {
   sqrtPriceStartX64: BN;
   tickNext: number;
@@ -683,396 +873,563 @@ export interface StepComputations {
   feeAmount: BN;
 }
 
-//
-// NOTE: Disabled
-//
-// export abstract class SwapMath {
-//   public static swapCompute(
-//     programId: PublicKey,
-//     poolId: PublicKey,
-//     tickArrayCache: { [key: string]: TickArray },
-//     tickArrayBitmap: BN[],
-//     tickarrayBitmapExtension: ReturnType<
-//       typeof TickArrayBitmapExtensionLayout.decode
-//     >,
-//     zeroForOne: boolean,
-//     fee: number,
-//     liquidity: BN,
-//     currentTick: number,
-//     tickSpacing: number,
-//     currentSqrtPriceX64: BN,
-//     amountSpecified: BN,
-//     lastSavedTickArrayStartIndex: number,
-//     sqrtPriceLimitX64?: BN,
-//     catchLiquidityInsufficient = false,
-//   ): {
-//     allTrade: boolean;
-//     amountSpecifiedRemaining: BN;
-//     amountCalculated: BN;
-//     feeAmount: BN;
-//     sqrtPriceX64: BN;
-//     liquidity: BN;
-//     tickCurrent: number;
-//     accounts: PublicKey[];
-//   } {
-//     if (amountSpecified.eq(ZERO)) {
-//       throw new Error("amountSpecified must not be 0");
-//     }
-//     if (!sqrtPriceLimitX64)
-//       sqrtPriceLimitX64 = zeroForOne
-//         ? MIN_SQRT_PRICE_X64.add(ONE)
-//         : MAX_SQRT_PRICE_X64.sub(ONE);
-//
-//     if (zeroForOne) {
-//       if (sqrtPriceLimitX64.lt(MIN_SQRT_PRICE_X64)) {
-//         throw new Error("sqrtPriceX64 must greater than MIN_SQRT_PRICE_X64");
-//       }
-//
-//       if (sqrtPriceLimitX64.gte(currentSqrtPriceX64)) {
-//         throw new Error("sqrtPriceX64 must smaller than current");
-//       }
-//     } else {
-//       if (sqrtPriceLimitX64.gt(MAX_SQRT_PRICE_X64)) {
-//         throw new Error("sqrtPriceX64 must smaller than MAX_SQRT_PRICE_X64");
-//       }
-//
-//       if (sqrtPriceLimitX64.lte(currentSqrtPriceX64)) {
-//         throw new Error("sqrtPriceX64 must greater than current");
-//       }
-//     }
-//     const baseInput = amountSpecified.gt(ZERO);
-//
-//     const state = {
-//       amountSpecifiedRemaining: amountSpecified,
-//       amountCalculated: ZERO,
-//       sqrtPriceX64: currentSqrtPriceX64,
-//       tick:
-//         currentTick > lastSavedTickArrayStartIndex
-//           ? Math.min(
-//               lastSavedTickArrayStartIndex +
-//                 TickQuery.tickCount(tickSpacing) -
-//                 1,
-//               currentTick,
-//             )
-//           : lastSavedTickArrayStartIndex,
-//       accounts: [] as PublicKey[],
-//       liquidity,
-//       feeAmount: new BN(0),
-//     };
-//     let tickAarrayStartIndex = lastSavedTickArrayStartIndex;
-//     let tickArrayCurrent = tickArrayCache[lastSavedTickArrayStartIndex];
-//     let loopCount = 0;
-//     let t = !zeroForOne && tickArrayCurrent.startTickIndex === state.tick;
-//     while (
-//       !state.amountSpecifiedRemaining.eq(ZERO) &&
-//       !state.sqrtPriceX64.eq(sqrtPriceLimitX64)
-//       // state.tick < MAX_TICK &&
-//       // state.tick > MIN_TICK
-//     ) {
-//       if (loopCount > 10) {
-//         // throw Error('liquidity limit')
-//       }
-//       const step: Partial<StepComputations> = {};
-//       step.sqrtPriceStartX64 = state.sqrtPriceX64;
-//
-//       const tickState: Tick | null = TickUtils.nextInitTick(
-//         tickArrayCurrent,
-//         state.tick,
-//         tickSpacing,
-//         zeroForOne,
-//         t,
-//       );
-//
-//       let nextInitTick: Tick | null = tickState ? tickState : null; // TickUtils.firstInitializedTick(tickArrayCurrent, zeroForOne)
-//       let tickArrayAddress: null | PublicKey = null;
-//
-//       if (!nextInitTick?.liquidityGross.gtn(0)) {
-//         const nextInitTickArrayIndex =
-//           PoolUtils.nextInitializedTickArrayStartIndex(
-//             {
-//               tickCurrent: state.tick,
-//               tickSpacing,
-//               tickArrayBitmap,
-//               exBitmapInfo: tickarrayBitmapExtension,
-//             },
-//             tickAarrayStartIndex,
-//             zeroForOne,
-//           );
-//         if (!nextInitTickArrayIndex.isExist) {
-//           if (catchLiquidityInsufficient) {
-//             return {
-//               allTrade: false,
-//               amountSpecifiedRemaining: state.amountSpecifiedRemaining,
-//               amountCalculated: state.amountCalculated,
-//               feeAmount: state.feeAmount,
-//               sqrtPriceX64: state.sqrtPriceX64,
-//               liquidity: state.liquidity,
-//               tickCurrent: state.tick,
-//               accounts: state.accounts,
-//             };
-//           }
-//           throw Error("swapCompute LiquidityInsufficient");
-//         }
-//         tickAarrayStartIndex = nextInitTickArrayIndex.nextStartIndex;
-//
-//         const { publicKey: expectedNextTickArrayAddress } =
-//           getPdaTickArrayAddress(programId, poolId, tickAarrayStartIndex);
-//         tickArrayAddress = expectedNextTickArrayAddress;
-//         tickArrayCurrent = tickArrayCache[tickAarrayStartIndex];
-//
-//         try {
-//           nextInitTick = TickUtils.firstInitializedTick(
-//             tickArrayCurrent,
-//             zeroForOne,
-//           );
-//         } catch (e) {
-//           throw Error("not found next tick info");
-//         }
-//       }
-//
-//       step.tickNext = nextInitTick.tick;
-//       step.initialized = nextInitTick.liquidityGross.gtn(0);
-//       if (
-//         lastSavedTickArrayStartIndex !== tickAarrayStartIndex &&
-//         tickArrayAddress
-//       ) {
-//         state.accounts.push(tickArrayAddress);
-//         lastSavedTickArrayStartIndex = tickAarrayStartIndex;
-//       }
-//       if (step.tickNext < MIN_TICK) {
-//         step.tickNext = MIN_TICK;
-//       } else if (step.tickNext > MAX_TICK) {
-//         step.tickNext = MAX_TICK;
-//       }
-//
-//       step.sqrtPriceNextX64 = SqrtPriceMath.getSqrtPriceX64FromTick(
-//         step.tickNext,
-//       );
-//       let targetPrice: BN;
-//       if (
-//         (zeroForOne && step.sqrtPriceNextX64.lt(sqrtPriceLimitX64)) ||
-//         (!zeroForOne && step.sqrtPriceNextX64.gt(sqrtPriceLimitX64))
-//       ) {
-//         targetPrice = sqrtPriceLimitX64;
-//       } else {
-//         targetPrice = step.sqrtPriceNextX64;
-//       }
-//       [state.sqrtPriceX64, step.amountIn, step.amountOut, step.feeAmount] =
-//         SwapMath.swapStepCompute(
-//           state.sqrtPriceX64,
-//           targetPrice,
-//           state.liquidity,
-//           state.amountSpecifiedRemaining,
-//           fee,
-//           zeroForOne,
-//         );
-//
-//       state.feeAmount = state.feeAmount.add(step.feeAmount);
-//
-//       if (baseInput) {
-//         state.amountSpecifiedRemaining = state.amountSpecifiedRemaining.sub(
-//           step.amountIn.add(step.feeAmount),
-//         );
-//         state.amountCalculated = state.amountCalculated.sub(step.amountOut);
-//       } else {
-//         state.amountSpecifiedRemaining = state.amountSpecifiedRemaining.add(
-//           step.amountOut,
-//         );
-//         state.amountCalculated = state.amountCalculated.add(
-//           step.amountIn.add(step.feeAmount),
-//         );
-//       }
-//       if (state.sqrtPriceX64.eq(step.sqrtPriceNextX64)) {
-//         if (step.initialized) {
-//           let liquidityNet = nextInitTick.liquidityNet;
-//           if (zeroForOne) liquidityNet = liquidityNet.mul(NEGATIVE_ONE);
-//           state.liquidity = LiquidityMath.addDelta(
-//             state.liquidity,
-//             liquidityNet,
-//           );
-//         }
-//
-//         t =
-//           step.tickNext != state.tick &&
-//           !zeroForOne &&
-//           tickArrayCurrent.startTickIndex === step.tickNext;
-//         state.tick = zeroForOne ? step.tickNext - 1 : step.tickNext; //
-//       } else if (state.sqrtPriceX64 != step.sqrtPriceStartX64) {
-//         const _T = SqrtPriceMath.getTickFromSqrtPriceX64(state.sqrtPriceX64);
-//         t =
-//           _T != state.tick &&
-//           !zeroForOne &&
-//           tickArrayCurrent.startTickIndex === _T;
-//         state.tick = _T;
-//       }
-//       ++loopCount;
-//     }
-//
-//     try {
-//       const { nextStartIndex: tickAarrayStartIndex, isExist } =
-//         TickQuery.nextInitializedTickArray(
-//           state.tick,
-//           tickSpacing,
-//           zeroForOne,
-//           tickArrayBitmap,
-//           tickarrayBitmapExtension,
-//         );
-//       if (isExist && lastSavedTickArrayStartIndex !== tickAarrayStartIndex) {
-//         state.accounts.push(
-//           getPdaTickArrayAddress(programId, poolId, tickAarrayStartIndex)
-//             .publicKey,
-//         );
-//         lastSavedTickArrayStartIndex = tickAarrayStartIndex;
-//       }
-//     } catch (e) {
-//       /* empty */
-//     }
-//
-//     return {
-//       allTrade: true,
-//       amountSpecifiedRemaining: ZERO,
-//       amountCalculated: state.amountCalculated,
-//       feeAmount: state.feeAmount,
-//       sqrtPriceX64: state.sqrtPriceX64,
-//       liquidity: state.liquidity,
-//       tickCurrent: state.tick,
-//       accounts: state.accounts,
-//     };
-//   }
-//
-//   private static swapStepCompute(
-//     sqrtPriceX64Current: BN,
-//     sqrtPriceX64Target: BN,
-//     liquidity: BN,
-//     amountRemaining: BN,
-//     feeRate: Fee,
-//     zeroForOne: boolean,
-//   ): [BN, BN, BN, BN] {
-//     const swapStep: SwapStep = {
-//       sqrtPriceX64Next: new BN(0),
-//       amountIn: new BN(0),
-//       amountOut: new BN(0),
-//       feeAmount: new BN(0),
-//     };
-//
-//     const baseInput = amountRemaining.gte(ZERO);
-//
-//     if (baseInput) {
-//       const amountRemainingSubtractFee = MathUtil.mulDivFloor(
-//         amountRemaining,
-//         FEE_RATE_DENOMINATOR.sub(new BN(feeRate.toString())),
-//         FEE_RATE_DENOMINATOR,
-//       );
-//       swapStep.amountIn = zeroForOne
-//         ? LiquidityMath.getTokenAmountAFromLiquidity(
-//             sqrtPriceX64Target,
-//             sqrtPriceX64Current,
-//             liquidity,
-//             true,
-//           )
-//         : LiquidityMath.getTokenAmountBFromLiquidity(
-//             sqrtPriceX64Current,
-//             sqrtPriceX64Target,
-//             liquidity,
-//             true,
-//           );
-//       if (amountRemainingSubtractFee.gte(swapStep.amountIn)) {
-//         swapStep.sqrtPriceX64Next = sqrtPriceX64Target;
-//       } else {
-//         swapStep.sqrtPriceX64Next = SqrtPriceMath.getNextSqrtPriceX64FromInput(
-//           sqrtPriceX64Current,
-//           liquidity,
-//           amountRemainingSubtractFee,
-//           zeroForOne,
-//         );
-//       }
-//     } else {
-//       swapStep.amountOut = zeroForOne
-//         ? LiquidityMath.getTokenAmountBFromLiquidity(
-//             sqrtPriceX64Target,
-//             sqrtPriceX64Current,
-//             liquidity,
-//             false,
-//           )
-//         : LiquidityMath.getTokenAmountAFromLiquidity(
-//             sqrtPriceX64Current,
-//             sqrtPriceX64Target,
-//             liquidity,
-//             false,
-//           );
-//       if (amountRemaining.mul(NEGATIVE_ONE).gte(swapStep.amountOut)) {
-//         swapStep.sqrtPriceX64Next = sqrtPriceX64Target;
-//       } else {
-//         swapStep.sqrtPriceX64Next = SqrtPriceMath.getNextSqrtPriceX64FromOutput(
-//           sqrtPriceX64Current,
-//           liquidity,
-//           amountRemaining.mul(NEGATIVE_ONE),
-//           zeroForOne,
-//         );
-//       }
-//     }
-//
-//     const reachTargetPrice = sqrtPriceX64Target.eq(swapStep.sqrtPriceX64Next);
-//
-//     if (zeroForOne) {
-//       if (!(reachTargetPrice && baseInput)) {
-//         swapStep.amountIn = LiquidityMath.getTokenAmountAFromLiquidity(
-//           swapStep.sqrtPriceX64Next,
-//           sqrtPriceX64Current,
-//           liquidity,
-//           true,
-//         );
-//       }
-//
-//       if (!(reachTargetPrice && !baseInput)) {
-//         swapStep.amountOut = LiquidityMath.getTokenAmountBFromLiquidity(
-//           swapStep.sqrtPriceX64Next,
-//           sqrtPriceX64Current,
-//           liquidity,
-//           false,
-//         );
-//       }
-//     } else {
-//       swapStep.amountIn =
-//         reachTargetPrice && baseInput
-//           ? swapStep.amountIn
-//           : LiquidityMath.getTokenAmountBFromLiquidity(
-//               sqrtPriceX64Current,
-//               swapStep.sqrtPriceX64Next,
-//               liquidity,
-//               true,
-//             );
-//       swapStep.amountOut =
-//         reachTargetPrice && !baseInput
-//           ? swapStep.amountOut
-//           : LiquidityMath.getTokenAmountAFromLiquidity(
-//               sqrtPriceX64Current,
-//               swapStep.sqrtPriceX64Next,
-//               liquidity,
-//               false,
-//             );
-//     }
-//
-//     if (
-//       !baseInput &&
-//       swapStep.amountOut.gt(amountRemaining.mul(NEGATIVE_ONE))
-//     ) {
-//       swapStep.amountOut = amountRemaining.mul(NEGATIVE_ONE);
-//     }
-//     if (baseInput && !swapStep.sqrtPriceX64Next.eq(sqrtPriceX64Target)) {
-//       swapStep.feeAmount = amountRemaining.sub(swapStep.amountIn);
-//     } else {
-//       swapStep.feeAmount = MathUtil.mulDivCeil(
-//         swapStep.amountIn,
-//         new BN(feeRate),
-//         FEE_RATE_DENOMINATOR.sub(new BN(feeRate)),
-//       );
-//     }
-//     return [
-//       swapStep.sqrtPriceX64Next,
-//       swapStep.amountIn,
-//       swapStep.amountOut,
-//       swapStep.feeAmount,
-//     ];
-//   }
-// }
+export class SwapMath {
+  /**
+   * Computes the result of swapping some amount in or amount out, given the parameters of the swap.
+   *
+   * This is the core swap calculation function that determines:
+   * - The new price after the swap step
+   * - How much input token is consumed
+   * - How much output token is produced
+   * - How much fee is charged
+   *
+   * **Corresponds to:** `compute_swap_step` in `programs/clmm/src/libraries/swap_math.rs`
+   *
+   * @param sqrtPriceCurrentX64 - Current sqrt price (X64 fixed-point)
+   * @param sqrtPriceTargetX64 - Target sqrt price for this step (X64 fixed-point)
+   * @param liquidity - Available liquidity for this price range
+   * @param amountRemaining - Amount of tokens remaining to be swapped
+   * @param feeRate - Fee rate (e.g., 3000 for 0.3%)
+   * @param isBaseInput - True if specifying exact input amount, false if specifying exact output
+   * @param zeroForOne - True if swapping token0 for token1, false otherwise
+   * @returns SwapStep result containing new price, amounts, and fees
+   *
+   * @example
+   * ```typescript
+   * const step = SwapMath.computeSwapStep(
+   *   new BN("1234567890"), // current price
+   *   new BN("9876543210"), // target price
+   *   new BN("1000000"),    // liquidity
+   *   new BN("10000"),      // amount remaining
+   *   3000,                 // 0.3% fee
+   *   true,                 // exact input
+   *   true                  // swap token0 for token1
+   * );
+   * console.log(`Amount in: ${step.amountIn}, Amount out: ${step.amountOut}, Fee: ${step.feeAmount}`);
+   * ```
+   */
+  public static computeSwapStep(
+    sqrtPriceCurrentX64: BN,
+    sqrtPriceTargetX64: BN,
+    liquidity: BN,
+    amountRemaining: BN,
+    feeRate: number,
+    isBaseInput: boolean,
+    zeroForOne: boolean
+  ): SwapStep {
+    const swapStep: SwapStep = {
+      sqrtPriceNextX64: ZERO,
+      amountIn: ZERO,
+      amountOut: ZERO,
+      feeAmount: ZERO,
+    };
+
+    if (isBaseInput) {
+      // In exact input case, we need to deduct fees first
+      const feeRateBN = new BN(feeRate);
+      const amountRemainingLessFee = MathUtils.mulDivFloor(
+        amountRemaining,
+        FEE_RATE_DENOMINATOR.sub(feeRateBN),
+        FEE_RATE_DENOMINATOR
+      );
+
+      // Calculate how much we can swap in this price range
+      const amountIn = this.calculateAmountInRange(
+        sqrtPriceCurrentX64,
+        sqrtPriceTargetX64,
+        liquidity,
+        zeroForOne,
+        isBaseInput
+      );
+
+      if (amountIn !== null) {
+        swapStep.amountIn = amountIn;
+      }
+
+      // Determine if we can reach the target price or if we'll fall short
+      swapStep.sqrtPriceNextX64 =
+        amountIn !== null && amountRemainingLessFee.gte(swapStep.amountIn)
+          ? sqrtPriceTargetX64
+          : SqrtPriceMath.getNextSqrtPriceX64FromInput(
+              sqrtPriceCurrentX64,
+              liquidity,
+              amountRemainingLessFee,
+              zeroForOne
+            );
+    } else {
+      // In exact output case
+      const amountOut = this.calculateAmountInRange(
+        sqrtPriceCurrentX64,
+        sqrtPriceTargetX64,
+        liquidity,
+        zeroForOne,
+        isBaseInput
+      );
+
+      if (amountOut !== null) {
+        swapStep.amountOut = amountOut;
+      }
+
+      // Determine if we can reach the target price
+      swapStep.sqrtPriceNextX64 =
+        amountOut !== null && amountRemaining.gte(swapStep.amountOut)
+          ? sqrtPriceTargetX64
+          : SqrtPriceMath.getNextSqrtPriceX64FromOutput(
+              sqrtPriceCurrentX64,
+              liquidity,
+              amountRemaining,
+              zeroForOne
+            );
+    }
+
+    // Check if we reached the maximum possible price for the given ticks
+    const max = sqrtPriceTargetX64.eq(swapStep.sqrtPriceNextX64);
+
+    // Get the input/output amounts when target price is not reached
+    if (zeroForOne) {
+      // Swapping token0 for token1 (price going down)
+      if (!(max && isBaseInput)) {
+        swapStep.amountIn = LiquidityMath.getTokenAmountAFromLiquidity(
+          swapStep.sqrtPriceNextX64,
+          sqrtPriceCurrentX64,
+          liquidity,
+          true // round up for amount in
+        );
+      }
+
+      if (!(max && !isBaseInput)) {
+        swapStep.amountOut = LiquidityMath.getTokenAmountBFromLiquidity(
+          swapStep.sqrtPriceNextX64,
+          sqrtPriceCurrentX64,
+          liquidity,
+          false // round down for amount out
+        );
+      }
+    } else {
+      // Swapping token1 for token0 (price going up)
+      if (!(max && isBaseInput)) {
+        swapStep.amountIn = LiquidityMath.getTokenAmountBFromLiquidity(
+          sqrtPriceCurrentX64,
+          swapStep.sqrtPriceNextX64,
+          liquidity,
+          true // round up for amount in
+        );
+      }
+
+      if (!(max && !isBaseInput)) {
+        swapStep.amountOut = LiquidityMath.getTokenAmountAFromLiquidity(
+          sqrtPriceCurrentX64,
+          swapStep.sqrtPriceNextX64,
+          liquidity,
+          false // round down for amount out
+        );
+      }
+    }
+
+    // For exact output, cap the output amount to not exceed remaining
+    if (!isBaseInput && swapStep.amountOut.gt(amountRemaining)) {
+      swapStep.amountOut = amountRemaining;
+    }
+
+    // Calculate fee amount
+    if (isBaseInput && !swapStep.sqrtPriceNextX64.eq(sqrtPriceTargetX64)) {
+      // We didn't reach the target, so take the remainder as fee (including any dust)
+      swapStep.feeAmount = amountRemaining.sub(swapStep.amountIn);
+    } else {
+      // Take the percentage fee
+      const feeRateBN = new BN(feeRate);
+      swapStep.feeAmount = MathUtils.mulDivCeil(
+        swapStep.amountIn,
+        feeRateBN,
+        FEE_RATE_DENOMINATOR.sub(feeRateBN)
+      );
+    }
+
+    return swapStep;
+  }
+
+  /**
+   * Pre-calculates amount_in or amount_out for the specified price range.
+   *
+   * The amount may overflow u64 due to unreasonable sqrt_price_target_x64.
+   * This function returns null when overflow occurs, which is handled in computeSwapStep
+   * to recalculate the price that can be reached based on the amount.
+   *
+   * **Corresponds to:** `calculate_amount_in_range` in `programs/clmm/src/libraries/swap_math.rs`
+   *
+   * @param sqrtPriceCurrentX64 - Current sqrt price
+   * @param sqrtPriceTargetX64 - Target sqrt price
+   * @param liquidity - Available liquidity
+   * @param zeroForOne - Swap direction
+   * @param isBaseInput - Whether this is an exact input swap
+   * @returns The calculated amount, or null if overflow would occur
+   *
+   * @private
+   */
+  private static calculateAmountInRange(
+    sqrtPriceCurrentX64: BN,
+    sqrtPriceTargetX64: BN,
+    liquidity: BN,
+    zeroForOne: boolean,
+    isBaseInput: boolean
+  ): BN | null {
+    try {
+      let result: BN;
+
+      if (isBaseInput) {
+        // Calculate input amount
+        if (zeroForOne) {
+          result = LiquidityMath.getTokenAmountAFromLiquidity(
+            sqrtPriceTargetX64,
+            sqrtPriceCurrentX64,
+            liquidity,
+            true // round up
+          );
+        } else {
+          result = LiquidityMath.getTokenAmountBFromLiquidity(
+            sqrtPriceCurrentX64,
+            sqrtPriceTargetX64,
+            liquidity,
+            true // round up
+          );
+        }
+      } else {
+        // Calculate output amount
+        if (zeroForOne) {
+          result = LiquidityMath.getTokenAmountBFromLiquidity(
+            sqrtPriceTargetX64,
+            sqrtPriceCurrentX64,
+            liquidity,
+            false // round down
+          );
+        } else {
+          result = LiquidityMath.getTokenAmountAFromLiquidity(
+            sqrtPriceCurrentX64,
+            sqrtPriceTargetX64,
+            liquidity,
+            false // round down
+          );
+        }
+      }
+
+      return result; // If we get here, no overflow occurred
+    } catch (e: any) {
+      // Emulate Rust behavior: Err(MaxTokenOverflow) → Ok(None); other errors → propagate
+      if (String(e?.message || "").startsWith("MaxTokenOverflow")) {
+        return null;
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Complete swap computation that handles crossing multiple ticks.
+   * This is the full implementation that iterates through tick arrays as needed.
+   *
+   * @param poolState - Current pool state with price, tick, liquidity
+   * @param tickArrayCache - Cache of loaded tick arrays
+   * @param tickSpacing - Pool tick spacing
+   * @param amountSpecified - Amount to swap (input for exact input, output for exact output)
+   * @param sqrtPriceLimitX64 - Price limit for slippage protection
+   * @param zeroForOne - Swap direction (token0 → token1 or token1 → token0)
+   * @param isBaseInput - True for exact input swaps, false for exact output swaps
+   * @param feeRate - Trading fee rate (e.g., 3000 for 0.3%)
+   * @param protocolFeeRate - Protocol fee rate (portion of trading fee)
+   * @param fundFeeRate - Fund fee rate (portion of trading fee)
+   * @param poolId - Pool address for PDA derivation
+   * @returns Swap result with amounts, fees, and updated state
+   *
+   * @example
+   * ```typescript
+   * const result = await SwapMath.swapCompute({
+   *   poolState: {
+   *     sqrtPriceX64: new BN("79228162514264337593543950336"),
+   *     tickCurrent: 0,
+   *     liquidity: new BN("1000000000"),
+   *     feeGrowthGlobal0X64: new BN(0),
+   *     feeGrowthGlobal1X64: new BN(0),
+   *   },
+   *   tickArrayCache: {},
+   *   tickSpacing: 10,
+   *   amountSpecified: new BN("1000000"),
+   *   sqrtPriceLimitX64: SwapMath.getDefaultSqrtPriceLimit(true),
+   *   zeroForOne: true,
+   *   isBaseInput: true,
+   *   feeRate: 3000,
+   *   protocolFeeRate: 200,
+   *   fundFeeRate: 100,
+   *   poolId: "..." as Address,
+   * });
+   * console.log(`Swapped ${result.amountIn} for ${result.amountOut}`);
+   * ```
+   */
+  public static async swapCompute(params: {
+    poolState: {
+      sqrtPriceX64: BN;
+      tickCurrent: number;
+      liquidity: BN;
+      feeGrowthGlobal0X64: BN;
+      feeGrowthGlobal1X64: BN;
+    };
+    tickArrayCache: { [key: string]: Account<TickArrayState> };
+    tickSpacing: number;
+    amountSpecified: BN;
+    sqrtPriceLimitX64: BN;
+    zeroForOne: boolean;
+    isBaseInput: boolean;
+    feeRate: number;
+    protocolFeeRate: number;
+    fundFeeRate: number;
+    poolId: Address;
+  }): Promise<{
+    amountIn: BN;
+    amountOut: BN;
+    feeAmount: BN;
+    protocolFee: BN;
+    fundFee: BN;
+    endSqrtPriceX64: BN;
+    endTick: number;
+    endLiquidity: BN;
+    crossedTicks: Array<{ tick: number; liquidityNet: bigint }>;
+  }> {
+    const {
+      poolState,
+      tickArrayCache,
+      tickSpacing,
+      amountSpecified,
+      sqrtPriceLimitX64,
+      zeroForOne,
+      isBaseInput,
+      feeRate,
+      protocolFeeRate,
+      fundFeeRate,
+      poolId,
+    } = params;
+
+    // Validate parameters
+    SwapMath.validateSwapParams(
+      poolState.sqrtPriceX64,
+      sqrtPriceLimitX64,
+      amountSpecified,
+      zeroForOne
+    );
+
+    // Initialize swap state
+    let state = {
+      amountSpecifiedRemaining: amountSpecified,
+      amountCalculated: new BN(0),
+      sqrtPriceX64: poolState.sqrtPriceX64,
+      tick: poolState.tickCurrent,
+      feeGrowthGlobalX64: zeroForOne
+        ? poolState.feeGrowthGlobal0X64
+        : poolState.feeGrowthGlobal1X64,
+      liquidity: poolState.liquidity,
+      feeAmount: new BN(0),
+      protocolFee: new BN(0),
+      fundFee: new BN(0),
+    };
+
+    const crossedTicks: Array<{ tick: number; liquidityNet: bigint }> = [];
+
+    // Continue swapping while we have amount remaining and haven't hit price limit
+    while (
+      state.amountSpecifiedRemaining.gt(ZERO) &&
+      !state.sqrtPriceX64.eq(sqrtPriceLimitX64)
+    ) {
+      // Find next initialized tick
+      const { nextTick } = await TickQuery.nextInitializedTick(
+        poolId,
+        tickArrayCache,
+        state.tick,
+        tickSpacing,
+        zeroForOne
+      );
+
+      // Get sqrt price at next tick
+      const sqrtPriceNextX64 = SqrtPriceMath.getSqrtPriceX64FromTick(
+        nextTick.tick
+      );
+
+      // Determine target price for this step
+      const targetPrice =
+        (zeroForOne && sqrtPriceNextX64.lt(sqrtPriceLimitX64)) ||
+        (!zeroForOne && sqrtPriceNextX64.gt(sqrtPriceLimitX64))
+          ? sqrtPriceLimitX64
+          : sqrtPriceNextX64;
+
+      // Compute swap step
+      const step = SwapMath.computeSwapStep(
+        state.sqrtPriceX64,
+        targetPrice,
+        state.liquidity,
+        state.amountSpecifiedRemaining,
+        feeRate,
+        isBaseInput,
+        zeroForOne
+      );
+
+      // Update state with step results
+      state.sqrtPriceX64 = step.sqrtPriceNextX64;
+
+      if (isBaseInput) {
+        state.amountSpecifiedRemaining = state.amountSpecifiedRemaining.sub(
+          step.amountIn.add(step.feeAmount)
+        );
+        state.amountCalculated = state.amountCalculated.add(step.amountOut);
+      } else {
+        state.amountSpecifiedRemaining = state.amountSpecifiedRemaining.sub(
+          step.amountOut
+        );
+        state.amountCalculated = state.amountCalculated.add(
+          step.amountIn.add(step.feeAmount)
+        );
+      }
+
+      // Calculate protocol and fund fees
+      const stepFeeAmount = step.feeAmount;
+      let remainingFee = step.feeAmount;
+
+      if (protocolFeeRate > 0) {
+        const protocolDelta = stepFeeAmount
+          .muln(protocolFeeRate)
+          .div(new BN(FEE_RATE_DENOMINATOR));
+        remainingFee = remainingFee.sub(protocolDelta);
+        state.protocolFee = state.protocolFee.add(protocolDelta);
+      }
+
+      if (fundFeeRate > 0) {
+        const fundDelta = stepFeeAmount
+          .muln(fundFeeRate)
+          .div(new BN(FEE_RATE_DENOMINATOR));
+        remainingFee = remainingFee.sub(fundDelta);
+        state.fundFee = state.fundFee.add(fundDelta);
+      }
+
+      // Update global fee tracker
+      if (state.liquidity.gt(ZERO)) {
+        const feeGrowthDelta = remainingFee.mul(Q64).div(state.liquidity);
+
+        state.feeGrowthGlobalX64 = state.feeGrowthGlobalX64.add(feeGrowthDelta);
+        state.feeAmount = state.feeAmount.add(remainingFee);
+      }
+
+      // Check if we crossed a tick
+      if (state.sqrtPriceX64.eq(sqrtPriceNextX64)) {
+        // Tick is initialized, cross it
+        if (nextTick.liquidityGross > 0n) {
+          // Apply liquidity change
+          let liquidityNet = nextTick.liquidityNet;
+          if (zeroForOne) {
+            liquidityNet = -liquidityNet;
+          }
+
+          // Record crossed tick
+          crossedTicks.push({
+            tick: nextTick.tick,
+            liquidityNet: nextTick.liquidityNet,
+          });
+
+          // Update liquidity
+          const liquidityNetBN = new BN(liquidityNet.toString());
+          if (liquidityNet >= 0n) {
+            state.liquidity = state.liquidity.add(liquidityNetBN);
+          } else {
+            state.liquidity = state.liquidity.sub(liquidityNetBN.abs());
+          }
+
+          // Ensure liquidity doesn't go negative
+          if (state.liquidity.lt(ZERO)) {
+            throw new Error("Liquidity underflow when crossing tick");
+          }
+        }
+
+        // Update tick
+        state.tick = zeroForOne ? nextTick.tick - 1 : nextTick.tick;
+      } else {
+        // Price changed but didn't cross a tick, update tick to current price's tick
+        state.tick = SqrtPriceMath.getTickFromSqrtPriceX64(state.sqrtPriceX64);
+      }
+
+      // Safety check: if we've crossed too many ticks, something might be wrong
+      if (crossedTicks.length > 100) {
+        throw new Error(
+          "Crossed too many ticks (>100). Check price impact or liquidity."
+        );
+      }
+    }
+
+    // Calculate final amounts
+    const amountIn = isBaseInput
+      ? amountSpecified.sub(state.amountSpecifiedRemaining)
+      : state.amountCalculated;
+
+    const amountOut = isBaseInput
+      ? state.amountCalculated
+      : amountSpecified.sub(state.amountSpecifiedRemaining);
+
+    return {
+      amountIn,
+      amountOut,
+      feeAmount: state.feeAmount,
+      protocolFee: state.protocolFee,
+      fundFee: state.fundFee,
+      endSqrtPriceX64: state.sqrtPriceX64,
+      endTick: state.tick,
+      endLiquidity: state.liquidity,
+      crossedTicks,
+    };
+  }
+
+  /**
+   * Helper function to validate swap parameters before execution.
+   *
+   * @param sqrtPriceCurrentX64 - Current sqrt price
+   * @param sqrtPriceLimitX64 - Price limit for slippage protection
+   * @param amountSpecified - Amount to swap
+   * @param zeroForOne - Swap direction
+   * @throws Error if parameters are invalid
+   */
+  public static validateSwapParams(
+    sqrtPriceCurrentX64: BN,
+    sqrtPriceLimitX64: BN,
+    amountSpecified: BN,
+    zeroForOne: boolean
+  ): void {
+    if (amountSpecified.eq(ZERO)) {
+      throw new Error("amountSpecified must not be 0");
+    }
+
+    if (zeroForOne) {
+      if (sqrtPriceLimitX64.lt(MIN_SQRT_PRICE_X64)) {
+        throw new Error("sqrtPriceLimitX64 must be >= MIN_SQRT_PRICE_X64");
+      }
+      if (sqrtPriceLimitX64.gte(sqrtPriceCurrentX64)) {
+        throw new Error(
+          "sqrtPriceLimitX64 must be < current price for zeroForOne swap"
+        );
+      }
+    } else {
+      if (sqrtPriceLimitX64.gt(MAX_SQRT_PRICE_X64)) {
+        throw new Error("sqrtPriceLimitX64 must be <= MAX_SQRT_PRICE_X64");
+      }
+      if (sqrtPriceLimitX64.lte(sqrtPriceCurrentX64)) {
+        throw new Error(
+          "sqrtPriceLimitX64 must be > current price for oneForZero swap"
+        );
+      }
+    }
+  }
+
+  /**
+   * Calculate default sqrt price limit based on swap direction.
+   * This provides slippage protection by limiting price movement.
+   *
+   * @param zeroForOne - Swap direction
+   * @returns Default price limit
+   */
+  public static getDefaultSqrtPriceLimit(zeroForOne: boolean): BN {
+    return zeroForOne
+      ? MIN_SQRT_PRICE_X64.add(ONE)
+      : MAX_SQRT_PRICE_X64.sub(ONE);
+  }
+}
