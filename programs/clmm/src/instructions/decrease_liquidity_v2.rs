@@ -44,11 +44,11 @@ pub struct DecreaseLiquidityV2<'info> {
 
     /// Stores init state for the lower tick
     #[account(mut, constraint = tick_array_lower.load()?.pool_id == pool_state.key())]
-    pub tick_array_lower: AccountLoader<'info, TickArrayState>,
+    pub tick_array_lower: UncheckedAccount<'info>,
 
     /// Stores init state for the upper tick
     #[account(mut, constraint = tick_array_upper.load()?.pool_id == pool_state.key())]
-    pub tick_array_upper: AccountLoader<'info, TickArrayState>,
+    pub tick_array_upper: UncheckedAccount<'info>,
 
     /// The destination token account for receive amount_0
     #[account(
@@ -104,13 +104,19 @@ pub fn decrease_liquidity_v2<'a, 'b, 'c: 'info, 'info>(
     amount_0_min: u64,
     amount_1_min: u64,
 ) -> Result<()> {
+    let mut tick_arrays = TickArraysMut::load(
+        &ctx.accounts.tick_array_lower,
+        &ctx.accounts.tick_array_upper,
+        &ctx.accounts.pool_state.key(),
+    )?;
+    let (lower_tick_array, upper_tick_array) = tick_arrays.deref();
     decrease_liquidity(
         &ctx.accounts.pool_state,
         &mut ctx.accounts.personal_position,
         &ctx.accounts.token_vault_0.to_account_info(),
         &ctx.accounts.token_vault_1.to_account_info(),
-        &ctx.accounts.tick_array_lower,
-        &ctx.accounts.tick_array_upper,
+        lower_tick_array,
+        upper_tick_array,
         &ctx.accounts.recipient_token_account_0.to_account_info(),
         &ctx.accounts.recipient_token_account_1.to_account_info(),
         &ctx.accounts.token_program,

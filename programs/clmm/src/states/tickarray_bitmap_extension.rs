@@ -229,7 +229,8 @@ pub mod tick_array_bitmap_extension_test {
     use std::str::FromStr;
 
     use super::*;
-    use crate::{libraries::MAX_TICK, tick_array::TICK_ARRAY_SIZE};
+    use crate::{libraries::MAX_TICK};
+    use crate::states::TICK_ARRAY_SIZE;
 
     pub fn flip_tick_array_bit_helper(
         tick_array_bitmap_extension: &mut TickArrayBitmapExtension,

@@ -1,5 +1,5 @@
 use super::pool::PoolState;
-use crate::error::ErrorCode;
+use crate::error::ErrorCode as StabbleErrorCode;
 use crate::libraries::{liquidity_math, tick_math};
 use crate::pool::{RewardInfo, REWARD_NUM};
 use crate::util::*;
@@ -7,12 +7,16 @@ use crate::Result;
 use anchor_lang::{prelude::*, system_program};
 #[cfg(feature = "enable-log")]
 use std::convert::identity;
+use crate::states::{Tick, TickArrayType, TickUpdate, TICK_ARRAY_SEED, TICK_ARRAY_SIZE, TICK_ARRAY_SIZE_USIZE};
 
-pub const TICK_ARRAY_SEED: &str = "tick_array";
-pub const TICK_ARRAY_SIZE_USIZE: usize = 60;
-pub const TICK_ARRAY_SIZE: i32 = 60;
-// pub const MIN_TICK_ARRAY_START_INDEX: i32 = -443636;
-// pub const MAX_TICK_ARRAY_START_INDEX: i32 = 306600;
+// The actual type should still be called TickArray so that it derives
+// the correct discriminator. This same rename is done in the SDKs to make the distinction clear between
+// * TickArray: A variable- or fixed-length tick array
+// * FixedTickArray: A fixed-length tick array
+// * DynamicTickArray: A variable-length tick array
+pub type FixedTickArray = TickArrayState;
+
+#[deprecated(note = "Use FixedTickArray instead")]
 #[account(zero_copy(unsafe))]
 #[repr(C, packed)]
 pub struct TickArrayState {
@@ -51,7 +55,7 @@ impl TickArrayState {
     ) -> Result<AccountLoad<'info, TickArrayState>> {
         require!(
             TickArrayState::check_is_valid_start_index(tick_array_start_index, tick_spacing),
-            ErrorCode::InvalidTickIndex
+            StabbleErrorCode::InvalidTickIndex
         );
 
         let tick_array_state = if tick_array_account_info.owner == &system_program::ID {
@@ -148,7 +152,7 @@ impl TickArrayState {
         require_eq!(
             start_tick_index,
             self.start_tick_index,
-            ErrorCode::InvalidTickArray
+            StabbleErrorCode::InvalidTickArray
         );
         let offset_in_array =
             ((tick_index - self.start_tick_index) / i32::from(tick_spacing)) as usize;
@@ -174,7 +178,7 @@ impl TickArrayState {
                 i = i + 1;
             }
         }
-        err!(ErrorCode::InvalidTickArray)
+        err!(StabbleErrorCode::InvalidTickArray)
     }
 
     /// Get next initialized tick in tick array, `current_tick_index` can be any tick index, in other words, `current_tick_index` not exactly a point in the tickarray,
@@ -264,6 +268,138 @@ impl Default for TickArrayState {
     }
 }
 
+impl TickArrayType for TickArrayState {
+    fn is_variable_size(&self) -> bool {
+        false
+    }
+
+    fn start_tick_index(&self) -> i32 {
+        self.start_tick_index
+    }
+
+    fn pool(&self) -> Pubkey {
+        self.pool_id
+    }
+
+    fn initialized_tick_count(&self) -> u8 {
+        let mut count: u8 = 0;
+        for tick_state in self.ticks {
+            if tick_state.liquidity_gross > 0 { count += 1 }
+        }
+        count
+    }
+
+    /// Search for the next initialized tick in this array.
+    ///
+    /// # Parameters
+    /// - `tick_index` - A i32 integer representing the tick index to start searching for
+    /// - `tick_spacing` - A u8 integer of the tick spacing for this pool
+    /// - `a_to_b` - If the trade is from a_to_b, the search will move to the left and the starting search tick is inclusive.
+    ///              If the trade is from b_to_a, the search will move to the right and the starting search tick is not inclusive.
+    ///
+    /// # Returns
+    /// - `Some(i32)`: The next initialized tick index of this array
+    /// - `None`: An initialized tick index was not found in this array
+    /// - `InvalidTickArraySequence` - error if `tick_index` is not a valid search tick for the array
+    /// - `InvalidTickSpacing` - error if the provided tick spacing is 0
+    fn get_next_init_tick_index(
+        &self,
+        tick_index: i32,
+        tick_spacing: u16,
+        a_to_b: bool,
+    ) -> Result<Option<i32>> {
+        if !self.in_search_range(tick_index, tick_spacing, !a_to_b) {
+            return Err(StabbleErrorCode::InvalidTickArraySequence.into());
+        }
+
+        let mut curr_offset = match self.tick_offset(tick_index, tick_spacing) {
+            Ok(value) => value as i32,
+            Err(e) => return Err(e),
+        };
+
+        // For a_to_b searches, the search moves to the left. The next possible init-tick can be the 1st tick in the current offset
+        // For b_to_a searches, the search moves to the right. The next possible init-tick cannot be within the current offset
+        if !a_to_b {
+            curr_offset += 1;
+        }
+
+        while (0..TICK_ARRAY_SIZE).contains(&curr_offset) {
+            let curr_tick = self.ticks[curr_offset as usize];
+            if curr_tick.liquidity_gross > 0 {
+                return Ok(Some(
+                    (curr_offset * tick_spacing as i32) + self.start_tick_index,
+                ));
+            }
+
+            curr_offset = if a_to_b {
+                curr_offset - 1
+            } else {
+                curr_offset + 1
+            };
+        }
+
+        Ok(None)
+    }
+
+    /// Get the Tick object at the given tick-index & tick-spacing
+    ///
+    /// # Parameters
+    /// - `tick_index` - the tick index the desired Tick object is stored in
+    /// - `tick_spacing` - A u8 integer of the tick spacing for this pool
+    ///
+    /// # Returns
+    /// - `&Tick`: A reference to the desired Tick object
+    /// - `TickNotFound`: - The provided tick-index is not an initializable tick index in this pool w/ this tick-spacing.
+    fn get_tick(&self, tick_index: i32, tick_spacing: u16) -> Result<Tick> {
+        if !self.check_in_array_bounds(tick_index, tick_spacing)
+            || !Tick::check_is_usable_tick(tick_index, tick_spacing)
+        {
+            return Err(StabbleErrorCode::TickNotFound.into());
+        }
+        let offset = self.tick_offset(tick_index, tick_spacing)?;
+        if offset < 0 {
+            return Err(StabbleErrorCode::TickNotFound.into());
+        }
+        let tick_state = self.ticks[offset as usize];
+        Ok(Tick {
+            initialized: true,
+            liquidity_net: tick_state.liquidity_net,
+            liquidity_gross: tick_state.liquidity_gross,
+            fee_growth_outside_a: tick_state.fee_growth_outside_0_x64,
+            fee_growth_outside_b: tick_state.fee_growth_outside_1_x64,
+            reward_growths_outside: tick_state.reward_growths_outside_x64,
+        })
+    }
+
+    /// Updates the Tick object at the given tick-index & tick-spacing
+    ///
+    /// # Parameters
+    /// - `tick_index` - the tick index the desired Tick object is stored in
+    /// - `tick_spacing` - A u8 integer of the tick spacing for this whirlpool
+    /// - `update` - A reference to a TickUpdate object to update the Tick object at the given index
+    ///
+    /// # Errors
+    /// - `TickNotFound`: - The provided tick-index is not an initializable tick index in this Whirlpool w/ this tick-spacing.
+    fn update_tick(
+        &mut self,
+        tick_index: i32,
+        tick_spacing: u16,
+        update: &TickUpdate,
+    ) -> Result<()> {
+        if !self.check_in_array_bounds(tick_index, tick_spacing)
+            || !Tick::check_is_usable_tick(tick_index, tick_spacing)
+        {
+            return Err(StabbleErrorCode::TickNotFound.into());
+        }
+        let offset = self.tick_offset(tick_index, tick_spacing)?;
+        if offset < 0 {
+            return Err(StabbleErrorCode::TickNotFound.into());
+        }
+        self.ticks.get_mut(offset as usize).unwrap().process_tick_update(update);
+        Ok(())
+    }
+}
+
 #[zero_copy(unsafe)]
 #[repr(C, packed)]
 #[derive(Default, Debug)]
@@ -290,15 +426,27 @@ impl TickState {
 
     pub fn initialize(&mut self, tick: i32, tick_spacing: u16) -> Result<()> {
         if TickState::check_is_out_of_boundary(tick) {
-            return err!(ErrorCode::InvalidTickIndex);
+            return err!(StabbleErrorCode::InvalidTickIndex);
         }
         require!(
             tick % i32::from(tick_spacing) == 0,
-            ErrorCode::TickAndSpacingNotMatch
+            StabbleErrorCode::TickAndSpacingNotMatch
         );
         self.tick = tick;
         Ok(())
     }
+    /// Apply an update for this tick
+    ///
+    /// # Parameters
+    /// - `update` - An update object to update the values in this tick
+    pub fn process_tick_update(&mut self, update: &TickUpdate) {
+        self.liquidity_net = update.liquidity_net;
+        self.liquidity_gross = update.liquidity_gross;
+        self.fee_growth_outside_0_x64 = update.fee_growth_outside_a;
+        self.fee_growth_outside_1_x64 = update.fee_growth_outside_b;
+        self.reward_growths_outside_x64 = update.reward_growths_outside;
+    }
+
     /// Updates a tick and returns true if the tick was flipped from initialized to uninitialized
     pub fn update(
         &mut self,
@@ -495,11 +643,11 @@ pub fn check_tick_array_start_index(
 ) -> Result<()> {
     require!(
         tick_index >= tick_math::MIN_TICK,
-        ErrorCode::TickLowerOverflow
+        StabbleErrorCode::TickLowerOverflow
     );
     require!(
         tick_index <= tick_math::MAX_TICK,
-        ErrorCode::TickUpperOverflow
+        StabbleErrorCode::TickUpperOverflow
     );
     require_eq!(0, tick_index % i32::from(tick_spacing));
     let expect_start_index = TickArrayState::get_array_start_index(tick_index, tick_spacing);
@@ -512,7 +660,7 @@ pub fn check_tick_array_start_index(
 pub fn check_ticks_order(tick_lower_index: i32, tick_upper_index: i32) -> Result<()> {
     require!(
         tick_lower_index < tick_upper_index,
-        ErrorCode::TickInvalidOrder
+        StabbleErrorCode::TickInvalidOrder
     );
     Ok(())
 }
@@ -656,7 +804,7 @@ pub mod tick_array_test {
                     .borrow()
                     .get_tick_offset_in_array(808, tick_spacing)
                     .unwrap_err(),
-                error!(ErrorCode::InvalidTickArray)
+                error!(StabbleErrorCode::InvalidTickArray)
             );
             // first index is tickarray start tick
             assert_eq!(
