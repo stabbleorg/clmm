@@ -2,7 +2,8 @@ use anchor_lang::account;
 use anchor_lang::{prelude::*, system_program};
 use arrayref::array_ref;
 use crate::error::ErrorCode;
-use crate::states::{PoolState, Tick, TickArrayType, TickUpdate, REWARD_NUM, TICK_ARRAY_SIZE, TICK_ARRAY_SIZE_USIZE};
+use crate::libraries::liquidity_math;
+use crate::states::{PoolState, RewardInfo, Tick, TickArrayType, TickState, TickUpdate, REWARD_NUM, TICK_ARRAY_SIZE, TICK_ARRAY_SIZE_USIZE};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Debug, PartialEq, Copy)]
 pub struct DynamicTickData {
@@ -10,9 +11,9 @@ pub struct DynamicTickData {
     pub liquidity_gross: u128, // 16
 
     // Q64.64
-    pub fee_growth_outside_a: u128, // 16
+    pub fee_growth_outside_0_x64: u128, // 16
     // Q64.64
-    pub fee_growth_outside_b: u128, // 16
+    pub fee_growth_outside_1_x64: u128, // 16
 
     // Array of Q64.64
     pub reward_growths_outside: [u128; REWARD_NUM], // 48 = 16 * 3
@@ -24,6 +25,90 @@ pub enum DynamicTick {
     Uninitialized,
     Initialized(DynamicTickData),
 }
+
+impl DynamicTick {
+    /// Updates a tick and returns true if the tick was flipped from initialized to uninitialized
+    pub fn update(
+        &mut self,
+        tick_index: i32,
+        tick_current: i32,
+        liquidity_delta: i128,
+        fee_growth_global_0_x64: u128,
+        fee_growth_global_1_x64: u128,
+        upper: bool,
+        reward_infos: &[RewardInfo; REWARD_NUM],
+    ) -> Result<bool> {
+        // Get current liquidity_gross (0 if uninitialized)
+        let liquidity_gross_before = match self {
+            DynamicTick::Uninitialized => 0,
+            DynamicTick::Initialized(data) => data.liquidity_gross,
+        };
+
+        let liquidity_gross_after =
+            liquidity_math::add_delta(liquidity_gross_before, liquidity_delta)?;
+
+        // Either liquidity_gross_after becomes 0 (uninitialized) XOR liquidity_gross_before
+        // was zero (initialized)
+        let flipped = (liquidity_gross_after == 0) != (liquidity_gross_before == 0);
+
+        // Handle initialization (flipping from Uninitialized to Initialized)
+        if liquidity_gross_before == 0 && liquidity_gross_after > 0 {
+            // Initialize with default values
+            let mut tick_data = DynamicTickData {
+                liquidity_net: 0,
+                liquidity_gross: liquidity_gross_after,
+                fee_growth_outside_0_x64: 0,
+                fee_growth_outside_1_x64: 0,
+                reward_growths_outside: [0; REWARD_NUM],
+            };
+
+            // by convention, we assume that all growth before a tick was initialized happened _below_ the tick
+            if tick_index <= tick_current {
+                tick_data.fee_growth_outside_0_x64 = fee_growth_global_0_x64;
+                tick_data.fee_growth_outside_1_x64 = fee_growth_global_1_x64;
+                tick_data.reward_growths_outside = RewardInfo::get_reward_growths(reward_infos);
+            }
+
+            // when the lower (upper) tick is crossed left to right (right to left),
+            // liquidity must be added (removed)
+            tick_data.liquidity_net = if upper {
+                0i128.checked_sub(liquidity_delta)
+            } else {
+                0i128.checked_add(liquidity_delta)
+            }
+                .unwrap();
+
+            *self = DynamicTick::Initialized(tick_data);
+            return Ok(flipped);
+        }
+
+        // Handle uninitialization (flipping from Initialized to Uninitialized)
+        if liquidity_gross_before > 0 && liquidity_gross_after == 0 {
+            *self = DynamicTick::Uninitialized;
+            return Ok(flipped);
+        }
+
+        // Update existing initialized tick
+        if let DynamicTick::Initialized(ref mut data) = self {
+            // by convention, we assume that all growth before a tick was initialized happened _below_ the tick
+            // This logic only applies when initializing (handled above), so we don't need to check again here
+
+            data.liquidity_gross = liquidity_gross_after;
+
+            // when the lower (upper) tick is crossed left to right (right to left),
+            // liquidity must be added (removed)
+            data.liquidity_net = if upper {
+                data.liquidity_net.checked_sub(liquidity_delta)
+            } else {
+                data.liquidity_net.checked_add(liquidity_delta)
+            }
+                .unwrap();
+        }
+
+        Ok(flipped)
+    }
+}
+
 // This struct is never actually used anywhere.
 // account attr is used to generate the definition in the IDL.
 pub struct DynamicTickArray {
@@ -69,8 +154,8 @@ impl From<&TickUpdate> for DynamicTick {
             DynamicTick::Initialized(DynamicTickData {
                 liquidity_net: update.liquidity_net,
                 liquidity_gross: update.liquidity_gross,
-                fee_growth_outside_a: update.fee_growth_outside_a,
-                fee_growth_outside_b: update.fee_growth_outside_b,
+                fee_growth_outside_0_x64: update.fee_growth_outside_0_x64,
+                fee_growth_outside_1_x64: update.fee_growth_outside_1_x64,
                 reward_growths_outside: update.reward_growths_outside,
             })
         } else {
@@ -87,8 +172,8 @@ impl From<DynamicTick> for Tick {
                 initialized: true,
                 liquidity_net: tick_data.liquidity_net,
                 liquidity_gross: tick_data.liquidity_gross,
-                fee_growth_outside_a: tick_data.fee_growth_outside_a,
-                fee_growth_outside_b: tick_data.fee_growth_outside_b,
+                fee_growth_outside_0_x64: tick_data.fee_growth_outside_0_x64,
+                fee_growth_outside_1_x64: tick_data.fee_growth_outside_1_x64,
                 reward_growths_outside: tick_data.reward_growths_outside,
             },
         }
@@ -229,7 +314,7 @@ impl TickArrayType for DynamicTickArrayLoader {
         tick_index: i32,
         tick_spacing: u16,
         update: &TickUpdate,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         if !self.check_in_array_bounds(tick_index, tick_spacing)
             || !Tick::check_is_usable_tick(tick_index, tick_spacing)
         {
@@ -240,6 +325,9 @@ impl TickArrayType for DynamicTickArrayLoader {
         let data = self.tick_data();
         let mut tick_data = &data[byte_offset..byte_offset + DynamicTick::INITIALIZED_LEN];
         let tick: Tick = DynamicTick::deserialize(&mut tick_data)?.into();
+
+        // Determine if the tick will be flipped (initialized state changes)
+        let flipped = tick.initialized != update.initialized;
 
         // If the tick needs to be initialized, we need to right-shift everything after byte_offset by DynamicTickData::LEN
         if !tick.initialized && update.initialized {
@@ -272,6 +360,24 @@ impl TickArrayType for DynamicTickArrayLoader {
         let mut tick_data = &mut data_mut[byte_offset..byte_offset + tick_data_len];
         DynamicTick::from(update).serialize(&mut tick_data)?;
 
+        Ok(flipped)
+    }
+
+    fn clear_tick(
+        &mut self,
+        tick_index: i32,
+        tick_spacing: u16,
+    ) -> Result<()> {
+        // Use update_tick with a cleared TickUpdate to clear the tick
+        let cleared_update = TickUpdate {
+            initialized: false,
+            liquidity_net: 0,
+            liquidity_gross: 0,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+        self.update_tick(tick_index, tick_spacing, &cleared_update)?;
         Ok(())
     }
 }

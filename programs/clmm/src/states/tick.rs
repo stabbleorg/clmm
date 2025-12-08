@@ -12,9 +12,9 @@ pub struct Tick {
     pub liquidity_gross: u128, // 16
 
     // Q64.64
-    pub fee_growth_outside_a: u128, // 16
+    pub fee_growth_outside_0_x64: u128, // 16
     // Q64.64
-    pub fee_growth_outside_b: u128, // 16
+    pub fee_growth_outside_1_x64: u128, // 16
 
     // Array of Q64.64
     pub reward_growths_outside: [u128; REWARD_NUM], // 48 = 16 * 3
@@ -26,8 +26,8 @@ impl From<TickUpdate> for Tick {
             initialized: update.initialized,
             liquidity_net: update.liquidity_net,
             liquidity_gross: update.liquidity_gross,
-            fee_growth_outside_a: update.fee_growth_outside_a,
-            fee_growth_outside_b: update.fee_growth_outside_b,
+            fee_growth_outside_0_x64: update.fee_growth_outside_0_x64,
+            fee_growth_outside_1_x64: update.fee_growth_outside_1_x64,
             reward_growths_outside: update.reward_growths_outside,
         }
     }
@@ -44,8 +44,8 @@ impl Tick {
         self.initialized = update.initialized;
         self.liquidity_net = update.liquidity_net;
         self.liquidity_gross = update.liquidity_gross;
-        self.fee_growth_outside_a = update.fee_growth_outside_a;
-        self.fee_growth_outside_b = update.fee_growth_outside_b;
+        self.fee_growth_outside_0_x64 = update.fee_growth_outside_0_x64;
+        self.fee_growth_outside_1_x64 = update.fee_growth_outside_1_x64;
         self.reward_growths_outside = update.reward_growths_outside;
     }
 
@@ -128,8 +128,8 @@ pub struct TickUpdate {
     pub initialized: bool,
     pub liquidity_net: i128,
     pub liquidity_gross: u128,
-    pub fee_growth_outside_a: u128,
-    pub fee_growth_outside_b: u128,
+    pub fee_growth_outside_0_x64: u128,
+    pub fee_growth_outside_1_x64: u128,
     pub reward_growths_outside: [u128; REWARD_NUM],
 }
 
@@ -139,8 +139,8 @@ impl From<Tick> for TickUpdate {
             initialized: tick.initialized,
             liquidity_net: tick.liquidity_net,
             liquidity_gross: tick.liquidity_gross,
-            fee_growth_outside_a: tick.fee_growth_outside_a,
-            fee_growth_outside_b: tick.fee_growth_outside_b,
+            fee_growth_outside_0_x64: tick.fee_growth_outside_0_x64,
+            fee_growth_outside_1_x64: tick.fee_growth_outside_1_x64,
             reward_growths_outside: tick.reward_growths_outside,
         }
     }
@@ -156,8 +156,8 @@ pub mod tick_builder {
         initialized: bool,
         liquidity_net: i128,
         liquidity_gross: u128,
-        fee_growth_outside_a: u128,
-        fee_growth_outside_b: u128,
+        fee_growth_outside_0_x64: u128,
+        fee_growth_outside_1_x64: u128,
         reward_growths_outside: [u128; REWARD_NUM],
     }
 
@@ -178,12 +178,12 @@ pub mod tick_builder {
         }
 
         pub fn fee_growth_outside_a(mut self, fee_growth_outside_a: u128) -> Self {
-            self.fee_growth_outside_a = fee_growth_outside_a;
+            self.fee_growth_outside_0_x64 = fee_growth_outside_a;
             self
         }
 
         pub fn fee_growth_outside_b(mut self, fee_growth_outside_b: u128) -> Self {
-            self.fee_growth_outside_b = fee_growth_outside_b;
+            self.fee_growth_outside_1_x64 = fee_growth_outside_b;
             self
         }
 
@@ -200,8 +200,8 @@ pub mod tick_builder {
                 initialized: self.initialized,
                 liquidity_net: self.liquidity_net,
                 liquidity_gross: self.liquidity_gross,
-                fee_growth_outside_a: self.fee_growth_outside_a,
-                fee_growth_outside_b: self.fee_growth_outside_b,
+                fee_growth_outside_0_x64: self.fee_growth_outside_0_x64,
+                fee_growth_outside_1_x64: self.fee_growth_outside_1_x64,
                 reward_growths_outside: self.reward_growths_outside,
             }
         }

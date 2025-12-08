@@ -1,23 +1,23 @@
-use super::modify_position;
+use super::{modify_position};
 use crate::error::ErrorCode;
 use crate::instructions::LiquidityChangeResult;
 use crate::states::*;
-use crate::util::get_recent_epoch;
+use crate::util::{get_recent_epoch, AccountLoad};
 use crate::util::{self, transfer_from_pool_vault_to_user};
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Token, TokenAccount};
 use anchor_spl::token_interface::{self, Mint, Token2022};
 use spl_token_2022;
 use std::cell::RefMut;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 pub fn decrease_liquidity<'a, 'b, 'c: 'info, 'info>(
     pool_state_loader: &'b AccountLoader<'info, PoolState>,
     personal_position: &'b mut Box<Account<'info, PersonalPositionState>>,
     token_vault_0: &'b AccountInfo<'info>,
     token_vault_1: &'b AccountInfo<'info>,
-    tick_array_lower_loader: &'b AccountLoader<'info, &dyn TickArrayType>,
-    tick_array_upper_loader: &'b AccountLoader<'info, &dyn TickArrayType>,
+    tick_array_lower_info: &'b AccountInfo<'info>,
+    tick_array_upper_info: &'b AccountInfo<'info>,
     recipient_token_account_0: &'b AccountInfo<'info>,
     recipient_token_account_1: &'b AccountInfo<'info>,
     token_program: &'b Program<'info, Token>,
@@ -52,10 +52,16 @@ pub fn decrease_liquidity<'a, 'b, 'c: 'info, 'info>(
         liquidity_before = pool_state.liquidity;
         pool_sqrt_price_x64 = pool_state.sqrt_price_x64;
         pool_tick_current = pool_state.tick_current;
+        let mut tick_arrays = TickArraysMut::load(
+            tick_array_lower_info,
+            tick_array_upper_info,
+            &pool_state_loader.key(),
+        )?;
+        let (tick_array_lower, tick_array_upper) = tick_arrays.deref();
 
         let use_tickarray_bitmap_extension = pool_state.is_overflow_default_tickarray_bitmap(vec![
-            tick_array_lower_loader.load()?.start_tick_index(),
-            tick_array_upper_loader.load()?.start_tick_index(),
+            tick_array_lower.start_tick_index(),
+            tick_array_upper.start_tick_index(),
         ]);
 
         for account_info in remaining_accounts.into_iter() {
@@ -80,8 +86,8 @@ pub fn decrease_liquidity<'a, 'b, 'c: 'info, 'info>(
         decrease_liquidity_and_update_position(
             pool_state_loader,
             personal_position,
-            tick_array_lower_loader,
-            tick_array_upper_loader,
+            tick_array_lower_info,
+            tick_array_upper_info,
             tickarray_bitmap_extension,
             liquidity,
         )?;
@@ -189,8 +195,8 @@ pub fn decrease_liquidity<'a, 'b, 'c: 'info, 'info>(
 pub fn decrease_liquidity_and_update_position<'a, 'b, 'c: 'info, 'info>(
     pool_state_loader: &AccountLoader<'info, PoolState>,
     personal_position: &mut Box<Account<'info, PersonalPositionState>>,
-    tick_array_lower: &AccountLoader<'info, &dyn TickArrayType>,
-    tick_array_upper: &AccountLoader<'info, &dyn TickArrayType>,
+    tick_array_lower_info: &'b AccountInfo<'info>,
+    tick_array_upper_info: &'b AccountInfo<'info>,
     tick_array_bitmap_extension: Option<&'c AccountInfo<'info>>,
     liquidity: u128,
 ) -> Result<(u64, u64, u64, u64)> {
@@ -207,8 +213,8 @@ pub fn decrease_liquidity_and_update_position<'a, 'b, 'c: 'info, 'info>(
             ..
         } = burn_liquidity(
             &mut pool_state,
-            tick_array_lower,
-            tick_array_upper,
+            tick_array_lower_info,
+            tick_array_upper_info,
             tick_array_bitmap_extension,
             personal_position.tick_lower_index,
             personal_position.tick_upper_index,
@@ -264,73 +270,42 @@ pub fn decrease_liquidity_and_update_position<'a, 'b, 'c: 'info, 'info>(
 
 pub fn burn_liquidity<'c: 'info, 'info>(
     pool_state: &mut RefMut<PoolState>,
-    tick_array_lower_loader: &AccountLoader<'info, &dyn TickArrayType>,
-    tick_array_upper_loader: &AccountLoader<'info, &dyn TickArrayType>,
+    tick_array_lower_info: &'c AccountInfo<'info>,
+    tick_array_upper_info: &'c AccountInfo<'info>,
     tickarray_bitmap_extension: Option<&'c AccountInfo<'info>>,
     tick_lower_index: i32,
     tick_upper_index: i32,
     liquidity: u128,
 ) -> Result<LiquidityChangeResult> {
-    require_keys_eq!(tick_array_lower_loader.load()?.pool(), pool_state.key());
-    require_keys_eq!(tick_array_upper_loader.load()?.pool(), pool_state.key());
+    let mut tick_arrays = TickArraysMut::load(
+        tick_array_lower_info,
+        tick_array_upper_info,
+        &pool_state.key().clone()
+    )?;
+    let (tick_lower_array, tick_upper_array) = tick_arrays.get_mut_refs();
+    require_keys_eq!(tick_lower_array.pool(), pool_state.key());
+    if let Some(upper_array) = tick_upper_array {
+        require_keys_eq!(upper_array.pool(), pool_state.key());
+    }
     let liquidity_before = pool_state.liquidity;
-    // get tick_state
-    let mut tick_lower_state = *tick_array_lower_loader
-        .load_mut()?
-        .get_tick_state_mut(tick_lower_index, pool_state.tick_spacing)?;
-    let mut tick_upper_state = *tick_array_upper_loader
-        .load_mut()?
-        .get_tick_state_mut(tick_upper_index, pool_state.tick_spacing)?;
     let clock = Clock::get()?;
     let result = modify_position(
         -i128::try_from(liquidity).unwrap(),
         pool_state,
-        &mut tick_lower_state,
-        &mut tick_upper_state,
+        tick_lower_array,
+        tick_upper_array,
+        tick_lower_index,
+        tick_upper_index,
         clock.unix_timestamp as u64,
     )?;
-
-    // update tick_state
-    tick_array_lower_loader.load_mut()?.update_tick_state(
-        tick_lower_index,
-        pool_state.tick_spacing,
-        tick_lower_state,
-    )?;
-    tick_array_upper_loader.load_mut()?.update_tick_state(
-        tick_upper_index,
-        pool_state.tick_spacing,
-        tick_upper_state,
-    )?;
-
-    if result.tick_lower_flipped {
-        let mut tick_array_lower = tick_array_lower_loader.load_mut()?;
-        tick_array_lower.update_initialized_tick_count(false)?;
-        if tick_array_lower.initialized_tick_count() == 0 {
-            pool_state.flip_tick_array_bit(
-                tickarray_bitmap_extension,
-                tick_array_lower.start_tick_index(),
-            )?;
-        }
-    }
-    if result.tick_upper_flipped {
-        let mut tick_array_upper = tick_array_upper_loader.load_mut()?;
-        tick_array_upper.update_initialized_tick_count(false)?;
-        if tick_array_upper.initialized_tick_count() == 0 {
-            pool_state.flip_tick_array_bit(
-                tickarray_bitmap_extension,
-                tick_array_upper.start_tick_index(),
-            )?;
-        }
-    }
-
     emit!(LiquidityChangeEvent {
-        pool_state: pool_state.key(),
-        tick: pool_state.tick_current,
-        tick_lower: tick_lower_index,
-        tick_upper: tick_upper_index,
-        liquidity_before: liquidity_before,
-        liquidity_after: pool_state.liquidity,
-    });
+            pool_state: pool_state.key(),
+            tick: pool_state.tick_current,
+            tick_lower: tick_lower_index,
+            tick_upper: tick_upper_index,
+            liquidity_before: liquidity_before,
+            liquidity_after: pool_state.liquidity,
+        });
 
     Ok(result)
 }
