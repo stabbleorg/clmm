@@ -24,7 +24,7 @@ use std::cell::RefMut;
 #[cfg(feature = "enable-log")]
 use std::convert::identity;
 use std::ops::Deref;
-use crate::instructions::modify_legacy_position;
+use crate::instructions::modify_position;
 
 pub fn open_position<'a, 'b, 'c: 'info, 'info>(
     payer: &'b Signer<'info>,
@@ -294,7 +294,7 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
         tick_upper_state.tick = tick_upper_index;
     }
     let clock = Clock::get()?;
-    let mut result = modify_position::modify_legacy_position(
+    let mut result = modify_position::modify_position(
         i128::try_from(*liquidity).unwrap(),
         pool_state,
         &mut tick_lower_state,

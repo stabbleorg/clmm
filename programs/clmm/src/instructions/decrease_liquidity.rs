@@ -11,15 +11,15 @@ use spl_token_2022;
 use std::cell::RefMut;
 use std::ops::{Deref, DerefMut};
 
-pub fn decrease_liquidity<'a, 'b, 'c: 'info, 'info>(
+pub fn decrease_liquidity<'b, 'c: 'info, 'info>(
     pool_state_loader: &'b AccountLoader<'info, PoolState>,
     personal_position: &'b mut Box<Account<'info, PersonalPositionState>>,
-    token_vault_0: &'b AccountInfo<'info>,
-    token_vault_1: &'b AccountInfo<'info>,
-    tick_array_lower_info: &'b AccountInfo<'info>,
-    tick_array_upper_info: &'b AccountInfo<'info>,
-    recipient_token_account_0: &'b AccountInfo<'info>,
-    recipient_token_account_1: &'b AccountInfo<'info>,
+    token_vault_0: &AccountInfo<'info>,
+    token_vault_1: &AccountInfo<'info>,
+    tick_array_lower_info: &AccountInfo<'info>,
+    tick_array_upper_info: &AccountInfo<'info>,
+    recipient_token_account_0: &AccountInfo<'info>,
+    recipient_token_account_1: &AccountInfo<'info>,
     token_program: &'b Program<'info, Token>,
     token_program_2022: Option<Program<'info, Token2022>>,
     _memo_program: Option<UncheckedAccount<'info>>,
@@ -192,11 +192,11 @@ pub fn decrease_liquidity<'a, 'b, 'c: 'info, 'info>(
     Ok(())
 }
 
-pub fn decrease_liquidity_and_update_position<'a, 'b, 'c: 'info, 'info>(
+pub fn decrease_liquidity_and_update_position<'c: 'info, 'info>(
     pool_state_loader: &AccountLoader<'info, PoolState>,
     personal_position: &mut Box<Account<'info, PersonalPositionState>>,
-    tick_array_lower_info: &'b AccountInfo<'info>,
-    tick_array_upper_info: &'b AccountInfo<'info>,
+    tick_array_lower_info: &AccountInfo<'info>,
+    tick_array_upper_info: &AccountInfo<'info>,
     tick_array_bitmap_extension: Option<&'c AccountInfo<'info>>,
     liquidity: u128,
 ) -> Result<(u64, u64, u64, u64)> {
@@ -270,8 +270,8 @@ pub fn decrease_liquidity_and_update_position<'a, 'b, 'c: 'info, 'info>(
 
 pub fn burn_liquidity<'c: 'info, 'info>(
     pool_state: &mut RefMut<PoolState>,
-    tick_array_lower_info: &'c AccountInfo<'info>,
-    tick_array_upper_info: &'c AccountInfo<'info>,
+    tick_array_lower_info: &AccountInfo<'info>,
+    tick_array_upper_info: &AccountInfo<'info>,
     tickarray_bitmap_extension: Option<&'c AccountInfo<'info>>,
     tick_lower_index: i32,
     tick_upper_index: i32,
@@ -284,7 +284,7 @@ pub fn burn_liquidity<'c: 'info, 'info>(
     )?;
     let (tick_lower_array, tick_upper_array) = tick_arrays.get_mut_refs();
     require_keys_eq!(tick_lower_array.pool(), pool_state.key());
-    if let Some(upper_array) = tick_upper_array {
+    if let Some(upper_array) = tick_upper_array.as_ref() {
         require_keys_eq!(upper_array.pool(), pool_state.key());
     }
     let liquidity_before = pool_state.liquidity;

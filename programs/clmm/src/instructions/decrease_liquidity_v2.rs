@@ -102,15 +102,23 @@ pub fn decrease_liquidity_v2<'a, 'b, 'c: 'info, 'info>(
     amount_0_min: u64,
     amount_1_min: u64,
 ) -> Result<()> {
+    // Store AccountInfo values to avoid temporary lifetime issues
+    let tick_array_lower_info = ctx.accounts.tick_array_lower.to_account_info();
+    let tick_array_upper_info = ctx.accounts.tick_array_upper.to_account_info();
+    let token_vault_0_info = ctx.accounts.token_vault_0.to_account_info();
+    let token_vault_1_info = ctx.accounts.token_vault_1.to_account_info();
+    let recipient_token_account_0_info = ctx.accounts.recipient_token_account_0.to_account_info();
+    let recipient_token_account_1_info = ctx.accounts.recipient_token_account_1.to_account_info();
+    
     decrease_liquidity(
         &ctx.accounts.pool_state,
         &mut ctx.accounts.personal_position,
-        &ctx.accounts.token_vault_0.to_account_info(),
-        &ctx.accounts.token_vault_1.to_account_info(),
-        &ctx.accounts.tick_array_lower,
-        &ctx.accounts.tick_array_upper,
-        &ctx.accounts.recipient_token_account_0.to_account_info(),
-        &ctx.accounts.recipient_token_account_1.to_account_info(),
+        &token_vault_0_info,
+        &token_vault_1_info,
+        &tick_array_lower_info,
+        &tick_array_upper_info,
+        &recipient_token_account_0_info,
+        &recipient_token_account_1_info,
         &ctx.accounts.token_program,
         Some(ctx.accounts.token_program_2022.clone()),
         Some(ctx.accounts.memo_program.clone()),

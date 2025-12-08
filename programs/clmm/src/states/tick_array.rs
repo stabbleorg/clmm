@@ -280,7 +280,7 @@ pub fn get_fee_growth_inside(
                 .checked_sub(lower_fee_growth_outside_0_x64)
                 .unwrap(),
             fee_growth_global_1_x64
-                .checked_sub(lower_fee_growth_outside_0_x64)
+                .checked_sub(lower_fee_growth_outside_1_x64)
                 .unwrap(),
         )
     };

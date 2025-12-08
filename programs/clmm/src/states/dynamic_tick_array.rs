@@ -19,6 +19,11 @@ pub struct DynamicTickData {
     pub reward_growths_outside: [u128; REWARD_NUM], // 48 = 16 * 3
 }
 
+impl DynamicTickData {
+    pub const LEN: usize = 112;
+}
+
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Debug, PartialEq, Copy)]
 pub enum DynamicTick {
     #[default]
@@ -213,21 +218,21 @@ impl DynamicTickArrayLoader {
     const TICK_BITMAP_OFFSET: usize = Self::POOL_OFFSET + 32;
     const TICK_DATA_OFFSET: usize = Self::TICK_BITMAP_OFFSET + 16;
 
-    pub fn initialize(
-        &mut self,
-        pool: &Account<PoolState>,
-        start_tick_index: i32,
-    ) -> Result<()> {
-        if !Tick::check_is_valid_start_tick(start_tick_index, pool.tick_spacing) {
-            return Err(ErrorCode::InvalidStartTick.into());
-        }
-
-        self.0[Self::START_TICK_INDEX_OFFSET..Self::START_TICK_INDEX_OFFSET + 4]
-            .copy_from_slice(&start_tick_index.to_le_bytes());
-        self.0[Self::POOL_OFFSET..Self::POOL_OFFSET + 32]
-            .copy_from_slice(&pool.key().to_bytes());
-        Ok(())
-    }
+    // pub fn initialize(
+    //     &mut self,
+    //     pool: &Account<PoolState>,
+    //     start_tick_index: i32,
+    // ) -> Result<()> {
+    //     if !Tick::check_is_valid_start_tick(start_tick_index, pool.tick_spacing) {
+    //         return Err(ErrorCode::InvalidStartTick.into());
+    //     }
+    //
+    //     self.0[Self::START_TICK_INDEX_OFFSET..Self::START_TICK_INDEX_OFFSET + 4]
+    //         .copy_from_slice(&start_tick_index.to_le_bytes());
+    //     self.0[Self::POOL_OFFSET..Self::POOL_OFFSET + 32]
+    //         .copy_from_slice(&pool.key().to_bytes());
+    //     Ok(())
+    // }
 
     fn tick_data(&self) -> &[u8] {
         &self.0[Self::TICK_DATA_OFFSET..]

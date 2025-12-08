@@ -11,7 +11,7 @@ pub fn modify_position(
     liquidity_delta: i128,
     pool_state: &mut RefMut<PoolState>,
     tick_lower_array: &mut LoadedTickArrayMut,
-    tick_upper_array: Option<&mut LoadedTickArrayMut>,
+    mut tick_upper_array: Option<&mut LoadedTickArrayMut>,
     tick_lower_index: i32,
     tick_upper_index: i32,
     timestamp: u64,
