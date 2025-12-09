@@ -404,7 +404,7 @@ impl TickArrayType for TickArrayState {
         // A flip occurs when the initialized state changes
         let flipped = was_initialized != will_be_initialized;
         
-        tick.process_tick_update(update);
+        tick.process_tick_update(update, tick_index);
         Ok(flipped)
     }
 
@@ -475,12 +475,13 @@ impl TickState {
     ///
     /// # Parameters
     /// - `update` - An update object to update the values in this tick
-    pub fn process_tick_update(&mut self, update: &TickUpdate) {
+    pub fn process_tick_update(&mut self, update: &TickUpdate, tick_index: i32,) {
         self.liquidity_net = update.liquidity_net;
         self.liquidity_gross = update.liquidity_gross;
         self.fee_growth_outside_0_x64 = update.fee_growth_outside_0_x64;
         self.fee_growth_outside_1_x64 = update.fee_growth_outside_1_x64;
         self.reward_growths_outside_x64 = update.reward_growths_outside;
+        self.tick = tick_index;
     }
 
     /// Updates a tick and returns true if the tick was flipped from initialized to uninitialized
