@@ -28,12 +28,10 @@ pub struct IncreaseLiquidityV2<'info> {
     pub personal_position: Box<Account<'info, PersonalPositionState>>,
 
     /// Stores init state for the lower tick
-    #[account(mut, constraint = tick_array_lower.load()?.pool_id == pool_state.key())]
-    pub tick_array_lower: AccountLoader<'info, TickArrayState>,
+    pub tick_array_lower: UncheckedAccount<'info>,
 
     /// Stores init state for the upper tick
-    #[account(mut, constraint = tick_array_upper.load()?.pool_id == pool_state.key())]
-    pub tick_array_upper: AccountLoader<'info, TickArrayState>,
+    pub tick_array_upper: UncheckedAccount<'info>,
 
     /// The payer's token account for token_0
     #[account(

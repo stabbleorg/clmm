@@ -216,8 +216,8 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     token_account_1: &'b AccountInfo<'info>,
     token_vault_0: &'b AccountInfo<'info>,
     token_vault_1: &'b AccountInfo<'info>,
-    tick_array_lower_loader: &'b AccountLoad<'info, TickArrayState>,
-    tick_array_upper_loader: &'b AccountLoad<'info, TickArrayState>,
+    tick_array_lower_info: &AccountInfo<'info>,
+    tick_array_upper_info: &AccountInfo<'info>,
     token_program_2022: Option<&Program<'info, Token2022>>,
     token_program: &'b Program<'info, Token>,
     vault_0_mint: Option<Box<InterfaceAccount<'info, token_interface::Mint>>>,
@@ -276,9 +276,19 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     }
     assert!(*liquidity > 0);
     let liquidity_before = pool_state.liquidity;
-    require_keys_eq!(tick_array_lower_loader.load()?.pool_id, pool_state.key());
-    require_keys_eq!(tick_array_upper_loader.load()?.pool_id, pool_state.key());
-
+    let mut tick_arrays = TickArraysMut::load(
+        tick_array_lower_info,
+        tick_array_upper_info,
+        &pool_state.key().clone()
+    )?;
+    let (tick_lower_array, tick_upper_array) = tick_arrays.get_mut_refs();
+    require_keys_eq!(tick_lower_array.pool(), pool_state.key());
+    if let Some(upper_array) = tick_upper_array.as_ref() {
+        require_keys_eq!(upper_array.pool(), pool_state.key());
+        // check if upper tick == 0
+        if
+    }
+    let tick_lower = tick_lower_array.get_tick(tick_lower_index, pool_state.tick_spacing);
     // get tick_state
     let mut tick_lower_state = *tick_array_lower_loader
         .load_mut()?
