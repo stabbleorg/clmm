@@ -7,6 +7,7 @@ import {clusterApiUrl, Connection, Keypair} from "@solana/web3.js";
 import {createPool} from "./createPool";
 import {fetchPool} from "./fetchPool";
 import {createConfig} from "./createConfig";
+import {updateProtocolFee} from "./updateProtocolFee";
 
 program
   .version("0.13.6")
@@ -26,6 +27,7 @@ program
 createPool(program);
 fetchPool(program);
 createConfig(program);
+updateProtocolFee(program);
 
 program.parse(process.argv);
 
