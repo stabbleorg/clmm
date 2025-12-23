@@ -31,6 +31,7 @@ import {
   findAssociatedTokenPda,
   TOKEN_PROGRAM_ADDRESS,
   getCreateAssociatedTokenIdempotentInstruction,
+  getCloseAccountInstruction,
 } from "@solana-program/token";
 import {
   PoolUtils,
@@ -72,6 +73,32 @@ export class PositionManager {
         amount,
       }),
       getSyncNativeInstruction({ account: ata }),
+    ];
+  }
+
+  private buildUnwrapSolInstruction(params: {
+    payer: TransactionSigner;
+    ata: Address;
+    owner: Address;
+    destination: Address;
+  }): Instruction[] {
+    const { payer, owner, destination, ata } = params;
+
+    return [
+      // There's a chance user might have deleted the ATA - create it with idempotent just to be sure.
+      getCreateAssociatedTokenIdempotentInstruction({
+        payer,
+        ata,
+        owner,
+        mint: address(NATIVE_MINT.toString()),
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+        systemProgram: SYSTEM_PROGRAM_ID,
+      }),
+      getCloseAccountInstruction({
+        account: ata,
+        destination,
+        owner,
+      }),
     ];
   }
 
@@ -610,8 +637,9 @@ export class PositionManager {
     ownerInfo: {
       wallet: TransactionSigner;
     };
+    isNative: boolean;
   }): Promise<MakeInstructionResult<{}>> {
-    const { ownerPosition, ownerInfo } = params;
+    const { ownerPosition, ownerInfo, isNative } = params;
 
     const [personalPosition] = await PdaUtils.getPositionStatePda(
       ownerPosition.nftMint,
@@ -630,8 +658,25 @@ export class PositionManager {
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
+    let unrwrapWsolInstructions: Instruction[] = [];
+    if (isNative) {
+      const ownerWallet = ownerInfo.wallet;
+      const [ata] = await findAssociatedTokenPda({
+        mint: address(NATIVE_MINT.toString()),
+        owner: ownerWallet.address,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      });
+
+      unrwrapWsolInstructions = this.buildUnwrapSolInstruction({
+        payer: ownerWallet,
+        ata,
+        owner: ownerWallet.address,
+        destination: ownerWallet.address,
+      });
+    }
+
     return {
-      instructions: [instruction],
+      instructions: [instruction, ...unrwrapWsolInstructions],
       signers: [],
       instructionTypes: ["ClosePosition"],
       address: { positionNftAccount, personalPosition },
