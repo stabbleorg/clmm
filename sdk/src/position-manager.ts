@@ -38,12 +38,14 @@ import {
   TickUtils,
   getMetadataPda,
   PdaUtils,
+  LiquidityMath,
 } from "./utils";
 import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import BN from "bn.js";
 import { NATIVE_MINT } from "@solana/spl-token";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { SYSTEM_PROGRAM_ID } from "./constants";
+import Decimal from "decimal.js";
 
 export class PositionManager {
   constructor(private readonly config: ClmmSdkConfig) {}
@@ -686,53 +688,31 @@ export class PositionManager {
     );
     const sqrtPriceCurrentX64 = new BN(pool.sqrtPriceX64.toString());
 
-    // Calculate token amounts from liquidity based on position relative to current price
-    let amount0: BN;
-    let amount1: BN;
-
-    const liquidity = new BN(position.liquidity.toString());
-
-    if (pool.tickCurrent < position.tickLowerIndex) {
-      // Position is above current price - only token0 has value
-      amount0 = PoolUtils.getAmount0FromLiquidity(
-        sqrtPriceLowerX64,
-        sqrtPriceUpperX64,
-        liquidity,
-      );
-      amount1 = new BN(0);
-    } else if (pool.tickCurrent >= position.tickUpperIndex) {
-      // Position is below current price - only token1 has value
-      amount0 = new BN(0);
-      amount1 = PoolUtils.getAmount1FromLiquidity(
-        sqrtPriceLowerX64,
-        sqrtPriceUpperX64,
-        liquidity,
-      );
-    } else {
-      // Position is in range - both tokens have value
-      amount0 = PoolUtils.getAmount0FromLiquidity(
-        sqrtPriceCurrentX64,
-        sqrtPriceUpperX64,
-        liquidity,
-      );
-      amount1 = PoolUtils.getAmount1FromLiquidity(
-        sqrtPriceLowerX64,
-        sqrtPriceCurrentX64,
-        liquidity,
-      );
-    }
-
-    // Calculate human-readable prices from ticks
-    const priceLower = TickUtils.tickToPrice(
-      position.tickLowerIndex,
-      pool.mintDecimals0,
-      pool.mintDecimals1,
+    const { amountA, amountB } = LiquidityMath.getAmountsFromLiquidity(
+      sqrtPriceCurrentX64,
+      sqrtPriceLowerX64,
+      sqrtPriceUpperX64,
+      new BN(position.liquidity.toString()),
+      true,
     );
-    const priceUpper = TickUtils.tickToPrice(
-      position.tickUpperIndex,
-      pool.mintDecimals0,
-      pool.mintDecimals1,
-    );
+
+    const [_amountA, _amountB] = [
+      new Decimal(amountA.toString()).div(10 ** pool.mintDecimals0),
+      new Decimal(amountB.toString()).div(10 ** pool.mintDecimals1),
+    ];
+
+    const priceLower = TickUtils.getTickPrice({
+      mintADecimals: pool.mintDecimals0,
+      mintBDecimals: pool.mintDecimals1,
+      tick: position.tickLowerIndex,
+      baseIn: true,
+    });
+    const priceUpper = TickUtils.getTickPrice({
+      mintADecimals: pool.mintDecimals0,
+      mintBDecimals: pool.mintDecimals1,
+      tick: position.tickUpperIndex,
+      baseIn: true,
+    });
 
     // Determine if position is in range
     const inRange =
@@ -753,12 +733,10 @@ export class PositionManager {
       ...position,
       tokenMint0: pool.tokenMint0,
       tokenMint1: pool.tokenMint1,
-      amount0: BigInt(amount0.toString()),
-      amount1: BigInt(amount1.toString()),
-      priceRange: {
-        lower: priceLower,
-        upper: priceUpper,
-      },
+      amount0: _amountA.toString(),
+      amount1: _amountB.toString(),
+      priceLower,
+      priceUpper,
       inRange,
       ageSeconds,
       unclaimedFees,

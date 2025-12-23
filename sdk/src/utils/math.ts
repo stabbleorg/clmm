@@ -190,7 +190,7 @@ export class SqrtPriceMath {
   public static sqrtPriceX64ToPrice(
     sqrtPriceX64: BN,
     decimalsA: number,
-    decimalsB: number
+    decimalsB: number,
   ): Decimal {
     return MathUtils.x64ToDecimal(sqrtPriceX64)
       .pow(2)
@@ -200,10 +200,10 @@ export class SqrtPriceMath {
   public static priceToSqrtPriceX64(
     price: Decimal,
     decimalsA: number,
-    decimalsB: number
+    decimalsB: number,
   ): BN {
     return MathUtils.decimalToX64(
-      price.mul(Decimal.pow(10, decimalsB - decimalsA)).sqrt()
+      price.mul(Decimal.pow(10, decimalsB - decimalsA)).sqrt(),
     );
   }
 
@@ -211,7 +211,7 @@ export class SqrtPriceMath {
     sqrtPriceX64: BN,
     liquidity: BN,
     amountIn: BN,
-    zeroForOne: boolean
+    zeroForOne: boolean,
   ): BN {
     if (!sqrtPriceX64.gt(ZERO)) {
       throw new Error("sqrtPriceX64 must greater than 0");
@@ -225,13 +225,13 @@ export class SqrtPriceMath {
           sqrtPriceX64,
           liquidity,
           amountIn,
-          true
+          true,
         )
       : this.getNextSqrtPriceFromTokenAmountBRoundingDown(
           sqrtPriceX64,
           liquidity,
           amountIn,
-          true
+          true,
         );
   }
 
@@ -239,7 +239,7 @@ export class SqrtPriceMath {
     sqrtPriceX64: BN,
     liquidity: BN,
     amountOut: BN,
-    zeroForOne: boolean
+    zeroForOne: boolean,
   ): BN {
     if (!sqrtPriceX64.gt(ZERO)) {
       throw new Error("sqrtPriceX64 must greater than 0");
@@ -253,13 +253,13 @@ export class SqrtPriceMath {
           sqrtPriceX64,
           liquidity,
           amountOut,
-          false
+          false,
         )
       : this.getNextSqrtPriceFromTokenAmountARoundingUp(
           sqrtPriceX64,
           liquidity,
           amountOut,
-          false
+          false,
         );
   }
 
@@ -267,7 +267,7 @@ export class SqrtPriceMath {
     sqrtPriceX64: BN,
     liquidity: BN,
     amount: BN,
-    add: boolean
+    add: boolean,
   ): BN {
     if (amount.eq(ZERO)) return sqrtPriceX64;
     const liquidityLeftShift = liquidity.shln(U64Resolution);
@@ -281,20 +281,20 @@ export class SqrtPriceMath {
       return MathUtils.mulDivRoundingUp(
         numerator1,
         ONE,
-        numerator1.div(sqrtPriceX64).add(amount)
+        numerator1.div(sqrtPriceX64).add(amount),
       );
     } else {
       const amountMulSqrtPrice = amount.mul(sqrtPriceX64);
       if (!liquidityLeftShift.gt(amountMulSqrtPrice)) {
         throw new Error(
-          "getNextSqrtPriceFromTokenAmountARoundingUp,liquidityLeftShift must gt amountMulSqrtPrice"
+          "getNextSqrtPriceFromTokenAmountARoundingUp,liquidityLeftShift must gt amountMulSqrtPrice",
         );
       }
       const denominator = liquidityLeftShift.sub(amountMulSqrtPrice);
       return MathUtils.mulDivCeil(
         liquidityLeftShift,
         sqrtPriceX64,
-        denominator
+        denominator,
       );
     }
   }
@@ -303,7 +303,7 @@ export class SqrtPriceMath {
     sqrtPriceX64: BN,
     liquidity: BN,
     amount: BN,
-    add: boolean
+    add: boolean,
   ): BN {
     const deltaY = amount.shln(U64Resolution);
     if (add) {
@@ -312,11 +312,11 @@ export class SqrtPriceMath {
       const amountDivLiquidity = MathUtils.mulDivRoundingUp(
         deltaY,
         ONE,
-        liquidity
+        liquidity,
       );
       if (!sqrtPriceX64.gt(amountDivLiquidity)) {
         throw new Error(
-          "getNextSqrtPriceFromTokenAmountBRoundingDown sqrtPriceX64 must gt amountDivLiquidity"
+          "getNextSqrtPriceFromTokenAmountBRoundingDown sqrtPriceX64 must gt amountDivLiquidity",
         );
       }
       return sqrtPriceX64.sub(amountDivLiquidity);
@@ -380,10 +380,10 @@ export class SqrtPriceMath {
   public static getTickFromPrice(
     price: Decimal,
     decimalsA: number,
-    decimalsB: number
+    decimalsB: number,
   ): number {
     return SqrtPriceMath.getTickFromSqrtPriceX64(
-      SqrtPriceMath.priceToSqrtPriceX64(price, decimalsA, decimalsB)
+      SqrtPriceMath.priceToSqrtPriceX64(price, decimalsA, decimalsB),
     );
   }
 
@@ -393,7 +393,7 @@ export class SqrtPriceMath {
       sqrtPriceX64.lt(MIN_SQRT_PRICE_X64)
     ) {
       throw new Error(
-        "Provided sqrtPrice is not within the supported sqrtPrice range."
+        "Provided sqrtPrice is not within the supported sqrtPrice range.",
       );
     }
 
@@ -425,12 +425,12 @@ export class SqrtPriceMath {
     const tickLow = signedRightShift(
       logbpX64.sub(new BN(LOG_B_P_ERR_MARGIN_LOWER_X64)),
       64,
-      128
+      128,
     ).toNumber();
     const tickHigh = signedRightShift(
       logbpX64.add(new BN(LOG_B_P_ERR_MARGIN_UPPER_X64)),
       64,
-      128
+      128,
     ).toNumber();
 
     if (tickLow == tickHigh) {
@@ -449,10 +449,10 @@ export class TickMath {
     price: Decimal,
     tickSpacing: number,
     mintDecimalsA: number,
-    mintDecimalsB: number
+    mintDecimalsB: number,
   ): number {
     const tick = SqrtPriceMath.getTickFromSqrtPriceX64(
-      SqrtPriceMath.priceToSqrtPriceX64(price, mintDecimalsA, mintDecimalsB)
+      SqrtPriceMath.priceToSqrtPriceX64(price, mintDecimalsA, mintDecimalsB),
     );
     let result = tick / tickSpacing;
     if (result < 0) {
@@ -467,19 +467,19 @@ export class TickMath {
     price: Decimal,
     tickSpacing: number,
     mintDecimalsA: number,
-    mintDecimalsB: number
+    mintDecimalsB: number,
   ): Decimal {
     const tick = TickMath.getTickWithPriceAndTickspacing(
       price,
       tickSpacing,
       mintDecimalsA,
-      mintDecimalsB
+      mintDecimalsB,
     );
     const sqrtPriceX64 = SqrtPriceMath.getSqrtPriceX64FromTick(tick);
     return SqrtPriceMath.sqrtPriceX64ToPrice(
       sqrtPriceX64,
       mintDecimalsA,
-      mintDecimalsB
+      mintDecimalsB,
     );
   }
 }
@@ -574,7 +574,7 @@ export class LiquidityMath {
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
     liquidity: BN,
-    roundUp: boolean
+    roundUp: boolean,
   ): BN {
     // Auto-swap to ensure sqrtPriceX64A < sqrtPriceX64B
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
@@ -595,10 +595,10 @@ export class LiquidityMath {
       ? MathUtils.mulDivRoundingUp(
           MathUtils.mulDivCeil(numerator1, numerator2, sqrtPriceX64B),
           ONE,
-          sqrtPriceX64A
+          sqrtPriceX64A,
         )
       : MathUtils.mulDivFloor(numerator1, numerator2, sqrtPriceX64B).div(
-          sqrtPriceX64A
+          sqrtPriceX64A,
         );
 
     return assertU64(result, "getTokenAmountAFromLiquidity");
@@ -652,7 +652,7 @@ export class LiquidityMath {
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
     liquidity: BN,
-    roundUp: boolean
+    roundUp: boolean,
   ): BN {
     // Auto-swap to ensure sqrtPriceX64A < sqrtPriceX64B
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
@@ -674,7 +674,7 @@ export class LiquidityMath {
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
     amountA: BN,
-    roundUp: boolean
+    roundUp: boolean,
   ): BN {
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
       [sqrtPriceX64A, sqrtPriceX64B] = [sqrtPriceX64B, sqrtPriceX64A];
@@ -694,7 +694,7 @@ export class LiquidityMath {
   public static getLiquidityFromTokenAmountB(
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
-    amountB: BN
+    amountB: BN,
   ): BN {
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
       [sqrtPriceX64A, sqrtPriceX64B] = [sqrtPriceX64B, sqrtPriceX64A];
@@ -702,7 +702,7 @@ export class LiquidityMath {
     return MathUtils.mulDivFloor(
       amountB,
       MaxU64,
-      sqrtPriceX64B.sub(sqrtPriceX64A)
+      sqrtPriceX64B.sub(sqrtPriceX64A),
     );
   }
 
@@ -711,7 +711,7 @@ export class LiquidityMath {
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
     amountA: BN,
-    amountB: BN
+    amountB: BN,
   ): BN {
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
       [sqrtPriceX64A, sqrtPriceX64B] = [sqrtPriceX64B, sqrtPriceX64A];
@@ -722,26 +722,26 @@ export class LiquidityMath {
         sqrtPriceX64A,
         sqrtPriceX64B,
         amountA,
-        false
+        false,
       );
     } else if (sqrtPriceCurrentX64.lt(sqrtPriceX64B)) {
       const liquidity0 = LiquidityMath.getLiquidityFromTokenAmountA(
         sqrtPriceCurrentX64,
         sqrtPriceX64B,
         amountA,
-        false
+        false,
       );
       const liquidity1 = LiquidityMath.getLiquidityFromTokenAmountB(
         sqrtPriceX64A,
         sqrtPriceCurrentX64,
-        amountB
+        amountB,
       );
       return liquidity0.lt(liquidity1) ? liquidity0 : liquidity1;
     } else {
       return LiquidityMath.getLiquidityFromTokenAmountB(
         sqrtPriceX64A,
         sqrtPriceX64B,
-        amountB
+        amountB,
       );
     }
   }
@@ -751,7 +751,7 @@ export class LiquidityMath {
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
     liquidity: BN,
-    roundUp: boolean
+    roundUp: boolean,
   ): { amountA: BN; amountB: BN } {
     if (sqrtPriceX64A.gt(sqrtPriceX64B)) {
       [sqrtPriceX64A, sqrtPriceX64B] = [sqrtPriceX64B, sqrtPriceX64A];
@@ -763,7 +763,7 @@ export class LiquidityMath {
           sqrtPriceX64A,
           sqrtPriceX64B,
           liquidity,
-          roundUp
+          roundUp,
         ),
         amountB: new BN(0),
       };
@@ -772,13 +772,13 @@ export class LiquidityMath {
         sqrtPriceCurrentX64,
         sqrtPriceX64B,
         liquidity,
-        roundUp
+        roundUp,
       );
       const amountB = LiquidityMath.getTokenAmountBFromLiquidity(
         sqrtPriceX64A,
         sqrtPriceCurrentX64,
         liquidity,
-        roundUp
+        roundUp,
       );
       return { amountA, amountB };
     } else {
@@ -788,7 +788,7 @@ export class LiquidityMath {
           sqrtPriceX64A,
           sqrtPriceX64B,
           liquidity,
-          roundUp
+          roundUp,
         ),
       };
     }
@@ -799,26 +799,28 @@ export class LiquidityMath {
     sqrtPriceX64A: BN,
     sqrtPriceX64B: BN,
     liquidity: BN,
-    amountMax: boolean,
+    add: boolean,
     roundUp: boolean,
-    amountSlippage: number
-  ): { amountSlippageA: BN; amountSlippageB: BN } {
+    amountSlippage: number,
+  ): { amountA: BN; amountB: BN; amountSlippageA: BN; amountSlippageB: BN } {
     const { amountA, amountB } = LiquidityMath.getAmountsFromLiquidity(
       sqrtPriceCurrentX64,
       sqrtPriceX64A,
       sqrtPriceX64B,
       liquidity,
-      roundUp
+      roundUp,
     );
-    const coefficient = amountMax ? 1 + amountSlippage : 1 - amountSlippage;
+    const coefficient = add ? 1 + amountSlippage : 1 - amountSlippage;
 
     const amount0Slippage = new BN(
-      new Decimal(amountA.toString()).mul(coefficient).toFixed(0)
+      new Decimal(amountA.toString()).mul(coefficient).toFixed(0),
     );
     const amount1Slippage = new BN(
-      new Decimal(amountB.toString()).mul(coefficient).toFixed(0)
+      new Decimal(amountB.toString()).mul(coefficient).toFixed(0),
     );
     return {
+      amountA,
+      amountB,
       amountSlippageA: amount0Slippage,
       amountSlippageB: amount1Slippage,
     };
@@ -915,7 +917,7 @@ export class SwapMath {
     amountRemaining: BN,
     feeRate: number,
     isBaseInput: boolean,
-    zeroForOne: boolean
+    zeroForOne: boolean,
   ): SwapStep {
     const swapStep: SwapStep = {
       sqrtPriceNextX64: ZERO,
@@ -930,7 +932,7 @@ export class SwapMath {
       const amountRemainingLessFee = MathUtils.mulDivFloor(
         amountRemaining,
         FEE_RATE_DENOMINATOR.sub(feeRateBN),
-        FEE_RATE_DENOMINATOR
+        FEE_RATE_DENOMINATOR,
       );
 
       // Calculate how much we can swap in this price range
@@ -939,7 +941,7 @@ export class SwapMath {
         sqrtPriceTargetX64,
         liquidity,
         zeroForOne,
-        isBaseInput
+        isBaseInput,
       );
 
       if (amountIn !== null) {
@@ -954,7 +956,7 @@ export class SwapMath {
               sqrtPriceCurrentX64,
               liquidity,
               amountRemainingLessFee,
-              zeroForOne
+              zeroForOne,
             );
     } else {
       // In exact output case
@@ -963,7 +965,7 @@ export class SwapMath {
         sqrtPriceTargetX64,
         liquidity,
         zeroForOne,
-        isBaseInput
+        isBaseInput,
       );
 
       if (amountOut !== null) {
@@ -978,7 +980,7 @@ export class SwapMath {
               sqrtPriceCurrentX64,
               liquidity,
               amountRemaining,
-              zeroForOne
+              zeroForOne,
             );
     }
 
@@ -993,7 +995,7 @@ export class SwapMath {
           swapStep.sqrtPriceNextX64,
           sqrtPriceCurrentX64,
           liquidity,
-          true // round up for amount in
+          true, // round up for amount in
         );
       }
 
@@ -1002,7 +1004,7 @@ export class SwapMath {
           swapStep.sqrtPriceNextX64,
           sqrtPriceCurrentX64,
           liquidity,
-          false // round down for amount out
+          false, // round down for amount out
         );
       }
     } else {
@@ -1012,7 +1014,7 @@ export class SwapMath {
           sqrtPriceCurrentX64,
           swapStep.sqrtPriceNextX64,
           liquidity,
-          true // round up for amount in
+          true, // round up for amount in
         );
       }
 
@@ -1021,7 +1023,7 @@ export class SwapMath {
           sqrtPriceCurrentX64,
           swapStep.sqrtPriceNextX64,
           liquidity,
-          false // round down for amount out
+          false, // round down for amount out
         );
       }
     }
@@ -1041,7 +1043,7 @@ export class SwapMath {
       swapStep.feeAmount = MathUtils.mulDivCeil(
         swapStep.amountIn,
         feeRateBN,
-        FEE_RATE_DENOMINATOR.sub(feeRateBN)
+        FEE_RATE_DENOMINATOR.sub(feeRateBN),
       );
     }
 
@@ -1071,7 +1073,7 @@ export class SwapMath {
     sqrtPriceTargetX64: BN,
     liquidity: BN,
     zeroForOne: boolean,
-    isBaseInput: boolean
+    isBaseInput: boolean,
   ): BN | null {
     try {
       let result: BN;
@@ -1083,14 +1085,14 @@ export class SwapMath {
             sqrtPriceTargetX64,
             sqrtPriceCurrentX64,
             liquidity,
-            true // round up
+            true, // round up
           );
         } else {
           result = LiquidityMath.getTokenAmountBFromLiquidity(
             sqrtPriceCurrentX64,
             sqrtPriceTargetX64,
             liquidity,
-            true // round up
+            true, // round up
           );
         }
       } else {
@@ -1100,14 +1102,14 @@ export class SwapMath {
             sqrtPriceTargetX64,
             sqrtPriceCurrentX64,
             liquidity,
-            false // round down
+            false, // round down
           );
         } else {
           result = LiquidityMath.getTokenAmountAFromLiquidity(
             sqrtPriceCurrentX64,
             sqrtPriceTargetX64,
             liquidity,
-            false // round down
+            false, // round down
           );
         }
       }
@@ -1211,7 +1213,7 @@ export class SwapMath {
       poolState.sqrtPriceX64,
       sqrtPriceLimitX64,
       amountSpecified,
-      zeroForOne
+      zeroForOne,
     );
 
     // Initialize swap state
@@ -1242,12 +1244,12 @@ export class SwapMath {
         tickArrayCache,
         state.tick,
         tickSpacing,
-        zeroForOne
+        zeroForOne,
       );
 
       // Get sqrt price at next tick
       const sqrtPriceNextX64 = SqrtPriceMath.getSqrtPriceX64FromTick(
-        nextTick.tick
+        nextTick.tick,
       );
 
       // Determine target price for this step
@@ -1265,7 +1267,7 @@ export class SwapMath {
         state.amountSpecifiedRemaining,
         feeRate,
         isBaseInput,
-        zeroForOne
+        zeroForOne,
       );
 
       // Update state with step results
@@ -1273,15 +1275,15 @@ export class SwapMath {
 
       if (isBaseInput) {
         state.amountSpecifiedRemaining = state.amountSpecifiedRemaining.sub(
-          step.amountIn.add(step.feeAmount)
+          step.amountIn.add(step.feeAmount),
         );
         state.amountCalculated = state.amountCalculated.add(step.amountOut);
       } else {
         state.amountSpecifiedRemaining = state.amountSpecifiedRemaining.sub(
-          step.amountOut
+          step.amountOut,
         );
         state.amountCalculated = state.amountCalculated.add(
-          step.amountIn.add(step.feeAmount)
+          step.amountIn.add(step.feeAmount),
         );
       }
 
@@ -1353,7 +1355,7 @@ export class SwapMath {
       // Safety check: if we've crossed too many ticks, something might be wrong
       if (crossedTicks.length > 100) {
         throw new Error(
-          "Crossed too many ticks (>100). Check price impact or liquidity."
+          "Crossed too many ticks (>100). Check price impact or liquidity.",
         );
       }
     }
@@ -1393,7 +1395,7 @@ export class SwapMath {
     sqrtPriceCurrentX64: BN,
     sqrtPriceLimitX64: BN,
     amountSpecified: BN,
-    zeroForOne: boolean
+    zeroForOne: boolean,
   ): void {
     if (amountSpecified.eq(ZERO)) {
       throw new Error("amountSpecified must not be 0");
@@ -1405,7 +1407,7 @@ export class SwapMath {
       }
       if (sqrtPriceLimitX64.gte(sqrtPriceCurrentX64)) {
         throw new Error(
-          "sqrtPriceLimitX64 must be < current price for zeroForOne swap"
+          "sqrtPriceLimitX64 must be < current price for zeroForOne swap",
         );
       }
     } else {
@@ -1414,7 +1416,7 @@ export class SwapMath {
       }
       if (sqrtPriceLimitX64.lte(sqrtPriceCurrentX64)) {
         throw new Error(
-          "sqrtPriceLimitX64 must be > current price for oneForZero swap"
+          "sqrtPriceLimitX64 must be > current price for oneForZero swap",
         );
       }
     }

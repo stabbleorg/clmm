@@ -11,6 +11,7 @@ import type { PoolState, PersonalPositionState } from "./generated";
 import BN from "bn.js";
 import { MAX_TICK, MIN_TICK } from "./constants";
 import { ClmmApiConfig } from "./api";
+import { ReturnTypeGetTickPrice } from "./utils";
 
 export type SolanaRpcType =
   | SolanaRpcApiMainnet
@@ -128,14 +129,12 @@ export interface PositionInfo extends PersonalPositionState {
   tokenMint1: Address;
 
   /** Computed token amounts based on liquidity and price range */
-  amount0: bigint;
-  amount1: bigint;
+  amount0: string;
+  amount1: string;
 
-  /** Price range bounds in human-readable format */
-  priceRange: {
-    lower: number;
-    upper: number;
-  };
+  /** Price range bounds */
+  priceLower: ReturnTypeGetTickPrice;
+  priceUpper: ReturnTypeGetTickPrice;
 
   /** Whether position is currently in range */
   inRange: boolean;
