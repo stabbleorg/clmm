@@ -8,6 +8,7 @@ import {createPool} from "./createPool";
 import {fetchPool} from "./fetchPool";
 import {createConfig} from "./createConfig";
 import {updateProtocolFee} from "./updateProtocolFee";
+import {updateFundFee} from "./updateFundFee";
 
 program
   .version("0.13.6")
@@ -28,6 +29,7 @@ createPool(program);
 fetchPool(program);
 createConfig(program);
 updateProtocolFee(program);
+updateFundFee(program);
 
 program.parse(process.argv);
 
