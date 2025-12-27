@@ -107,4 +107,16 @@ pub enum ErrorCode {
     CalculateOverflow,
     #[msg("TransferFee calculate not match")]
     TransferFeeCalculateNotMatch,
+
+    /// tick array related
+    #[msg("Tick-spacing is not supported")]
+    InvalidTickSpacing,
+    #[msg("Invalid tick array sequence provided for instruction.")]
+    InvalidTickArraySequence,
+    #[msg("Tick not found within tick array")]
+    TickNotFound,
+    #[msg("TickArray account for different pool provided")]
+    DifferentPoolTickArrayAccount,
+    #[msg("Invalid start tick index provided.")]
+    InvalidStartTick,
 }

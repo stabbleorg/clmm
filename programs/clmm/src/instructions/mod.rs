@@ -45,3 +45,6 @@ pub use collect_remaining_rewards::*;
 
 pub mod admin;
 pub use admin::*;
+
+mod modify_position;
+pub use modify_position::*;

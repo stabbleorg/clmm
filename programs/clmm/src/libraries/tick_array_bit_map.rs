@@ -1,8 +1,9 @@
 ///! Helper functions to get most and least significant non-zero bits
 use super::big_num::U1024;
 use crate::error::ErrorCode;
-use crate::states::tick_array::{TickArrayState, TickState, TICK_ARRAY_SIZE};
+use crate::states::fixed_tick_array::{TickArrayState, TickState};
 use anchor_lang::prelude::*;
+use crate::states::TICK_ARRAY_SIZE;
 
 pub const TICK_ARRAY_BITMAP_SIZE: i32 = 512;
 

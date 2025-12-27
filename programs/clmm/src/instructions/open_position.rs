@@ -24,6 +24,7 @@ use std::cell::RefMut;
 #[cfg(feature = "enable-log")]
 use std::convert::identity;
 use std::ops::Deref;
+use crate::instructions::modify_position;
 
 pub fn open_position<'a, 'b, 'c: 'info, 'info>(
     payer: &'b Signer<'info>,
@@ -215,8 +216,8 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     token_account_1: &'b AccountInfo<'info>,
     token_vault_0: &'b AccountInfo<'info>,
     token_vault_1: &'b AccountInfo<'info>,
-    tick_array_lower_loader: &'b AccountLoad<'info, TickArrayState>,
-    tick_array_upper_loader: &'b AccountLoad<'info, TickArrayState>,
+    tick_array_lower_info: &AccountInfo<'info>,
+    tick_array_upper_info: &AccountInfo<'info>,
     token_program_2022: Option<&Program<'info, Token2022>>,
     token_program: &'b Program<'info, Token>,
     vault_0_mint: Option<Box<InterfaceAccount<'info, token_interface::Mint>>>,
@@ -275,9 +276,19 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     }
     assert!(*liquidity > 0);
     let liquidity_before = pool_state.liquidity;
-    require_keys_eq!(tick_array_lower_loader.load()?.pool_id, pool_state.key());
-    require_keys_eq!(tick_array_upper_loader.load()?.pool_id, pool_state.key());
-
+    let mut tick_arrays = TickArraysMut::load(
+        tick_array_lower_info,
+        tick_array_upper_info,
+        &pool_state.key().clone()
+    )?;
+    let (tick_lower_array, tick_upper_array) = tick_arrays.get_mut_refs();
+    require_keys_eq!(tick_lower_array.pool(), pool_state.key());
+    if let Some(upper_array) = tick_upper_array.as_ref() {
+        require_keys_eq!(upper_array.pool(), pool_state.key());
+        // check if upper tick == 0
+        if
+    }
+    let tick_lower = tick_lower_array.get_tick(tick_lower_index, pool_state.tick_spacing);
     // get tick_state
     let mut tick_lower_state = *tick_array_lower_loader
         .load_mut()?
@@ -293,7 +304,7 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
         tick_upper_state.tick = tick_upper_index;
     }
     let clock = Clock::get()?;
-    let mut result = modify_position(
+    let mut result = modify_position::modify_position(
         i128::try_from(*liquidity).unwrap(),
         pool_state,
         &mut tick_lower_state,
@@ -315,7 +326,7 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
 
     if result.tick_lower_flipped {
         let mut tick_array_lower = tick_array_lower_loader.load_mut()?;
-        let before_init_tick_count = tick_array_lower.initialized_tick_count;
+        let before_init_tick_count = tick_array_lower.initialized_tick_count();
         tick_array_lower.update_initialized_tick_count(true)?;
 
         if before_init_tick_count == 0 {
@@ -327,7 +338,7 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     }
     if result.tick_upper_flipped {
         let mut tick_array_upper = tick_array_upper_loader.load_mut()?;
-        let before_init_tick_count = tick_array_upper.initialized_tick_count;
+        let before_init_tick_count = tick_array_upper.initialized_tick_count();
         tick_array_upper.update_initialized_tick_count(true)?;
 
         if before_init_tick_count == 0 {
@@ -417,103 +428,6 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
         liquidity_after: pool_state.liquidity,
     });
     Ok(result)
-}
-
-pub fn modify_position(
-    liquidity_delta: i128,
-    pool_state: &mut RefMut<PoolState>,
-    tick_lower_state: &mut TickState,
-    tick_upper_state: &mut TickState,
-    timestamp: u64,
-) -> Result<LiquidityChangeResult> {
-    let updated_reward_infos = pool_state.update_reward_infos(timestamp)?;
-
-    let mut flipped_lower = false;
-    let mut flipped_upper = false;
-
-    // update the ticks if liquidity delta is non-zero
-    if liquidity_delta != 0 {
-        // Update tick state and find if tick is flipped
-        flipped_lower = tick_lower_state.update(
-            pool_state.tick_current,
-            liquidity_delta,
-            pool_state.fee_growth_global_0_x64,
-            pool_state.fee_growth_global_1_x64,
-            false,
-            &updated_reward_infos,
-        )?;
-        flipped_upper = tick_upper_state.update(
-            pool_state.tick_current,
-            liquidity_delta,
-            pool_state.fee_growth_global_0_x64,
-            pool_state.fee_growth_global_1_x64,
-            true,
-            &updated_reward_infos,
-        )?;
-        #[cfg(feature = "enable-log")]
-        msg!(
-            "tick_upper.reward_growths_outside_x64:{:?}, tick_lower.reward_growths_outside_x64:{:?}",
-            identity(tick_upper_state.reward_growths_outside_x64),
-            identity(tick_lower_state.reward_growths_outside_x64)
-        );
-    }
-
-    // Update fees
-    let (fee_growth_inside_0_x64, fee_growth_inside_1_x64) = tick_array::get_fee_growth_inside(
-        tick_lower_state.deref(),
-        tick_upper_state.deref(),
-        pool_state.tick_current,
-        pool_state.fee_growth_global_0_x64,
-        pool_state.fee_growth_global_1_x64,
-    );
-
-    // Update reward outside if needed
-    let reward_growths_inside = tick_array::get_reward_growths_inside(
-        tick_lower_state.deref(),
-        tick_upper_state.deref(),
-        pool_state.tick_current,
-        &updated_reward_infos,
-    );
-
-    if liquidity_delta < 0 {
-        if flipped_lower {
-            tick_lower_state.clear();
-        }
-        if flipped_upper {
-            tick_upper_state.clear();
-        }
-    }
-
-    let mut amount_0 = 0;
-    let mut amount_1 = 0;
-
-    if liquidity_delta != 0 {
-        (amount_0, amount_1) = liquidity_math::get_delta_amounts_signed(
-            pool_state.tick_current,
-            pool_state.sqrt_price_x64,
-            tick_lower_state.tick,
-            tick_upper_state.tick,
-            liquidity_delta,
-        )?;
-        if pool_state.tick_current >= tick_lower_state.tick
-            && pool_state.tick_current < tick_upper_state.tick
-        {
-            pool_state.liquidity =
-                liquidity_math::add_delta(pool_state.liquidity, liquidity_delta)?;
-        }
-    }
-
-    Ok(LiquidityChangeResult {
-        amount_0: amount_0,
-        amount_1: amount_1,
-        amount_0_transfer_fee: 0,
-        amount_1_transfer_fee: 0,
-        tick_lower_flipped: flipped_lower,
-        tick_upper_flipped: flipped_upper,
-        fee_growth_inside_0_x64: fee_growth_inside_0_x64,
-        fee_growth_inside_1_x64: fee_growth_inside_1_x64,
-        reward_growths_inside: reward_growths_inside,
-    })
 }
 
 fn mint_nft_and_remove_mint_authority<'info>(
@@ -731,7 +645,7 @@ pub fn initialize_token_metadata_extension<'info>(
 
 #[cfg(test)]
 mod modify_position_test {
-    use super::modify_position;
+    use crate::instructions::modify_position::modify_legacy_position;
     use crate::instructions::LiquidityChangeResult;
     use crate::libraries::tick_math;
     use crate::states::oracle::block_timestamp_mock;
@@ -762,7 +676,7 @@ mod modify_position_test {
             tick_lower_flipped: flip_tick_lower,
             tick_upper_flipped: flip_tick_upper,
             ..
-        } = modify_position(
+        } = modify_legacy_position(
             liquidity_delta,
             pool_state,
             tick_lower_state,
@@ -817,7 +731,7 @@ mod modify_position_test {
             tick_lower_flipped: flip_tick_lower,
             tick_upper_flipped: flip_tick_upper,
             ..
-        } = modify_position(
+        } = modify_legacy_position(
             liquidity_delta,
             pool_state,
             tick_lower_state,
@@ -872,7 +786,7 @@ mod modify_position_test {
             tick_lower_flipped: flip_tick_lower,
             tick_upper_flipped: flip_tick_upper,
             ..
-        } = modify_position(
+        } = modify_legacy_position(
             liquidity_delta,
             pool_state,
             tick_lower_state,
