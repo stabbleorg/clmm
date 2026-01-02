@@ -32,6 +32,8 @@ import {
   TOKEN_PROGRAM_ADDRESS,
   getCreateAssociatedTokenIdempotentInstruction,
   getCloseAccountInstruction,
+  getInitializeAccount3Instruction,
+  getTransferCheckedInstruction,
 } from "@solana-program/token";
 import {
   PoolUtils,
@@ -44,8 +46,14 @@ import {
 import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import BN from "bn.js";
 import { NATIVE_MINT } from "@solana/spl-token";
-import { getTransferSolInstruction } from "@solana-program/system";
+import {
+  getTransferSolInstruction,
+  getCreateAccountInstruction,
+} from "@solana-program/system";
 import { SYSTEM_PROGRAM_ID } from "./constants";
+
+// Token account size in bytes (standard SPL token account)
+const TOKEN_ACCOUNT_SIZE = 165n;
 import Decimal from "decimal.js";
 
 export class PositionManager {
@@ -100,6 +108,72 @@ export class PositionManager {
         owner,
       }),
     ];
+  }
+
+  /**
+   * Build partial unwrap SOL instructions using a temp account:
+   * 1. Create temp account
+   * 2. Initialize as WSOL token account
+   * 3. Transfer specific amount from source ATA to temp
+   * 4. Close temp account (lamports go to destination)
+   */
+  private async buildPartialUnwrapSolInstructions(params: {
+    payer: TransactionSigner;
+    sourceAta: Address;
+    destination: Address;
+    amount: bigint;
+  }): Promise<{ instructions: Instruction[]; signers: TransactionSigner[] }> {
+    const { payer, sourceAta, destination, amount } = params;
+
+    const rentExemptLamports = await this.config.rpc
+      .getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_SIZE)
+      .send();
+
+    const tempAccount = await generateKeyPairSigner();
+
+    // 1. Create temp account with system program
+    const createTempAccountIx = getCreateAccountInstruction({
+      payer,
+      newAccount: tempAccount,
+      lamports: rentExemptLamports,
+      space: TOKEN_ACCOUNT_SIZE,
+      programAddress: TOKEN_PROGRAM_ADDRESS,
+    });
+
+    // 2. Initialize temp account as WSOL token account
+    // Destination owns the temp account so they can close it
+    const initTempAccountIx = getInitializeAccount3Instruction({
+      account: tempAccount.address,
+      mint: address(NATIVE_MINT.toString()),
+      owner: destination,
+    });
+
+    // 3. Transfer specific WSOL amount from source ATA to temp account
+    const transferIx = getTransferCheckedInstruction({
+      source: sourceAta,
+      mint: address(NATIVE_MINT.toString()),
+      destination: tempAccount.address,
+      authority: payer,
+      amount,
+      decimals: 9,
+    });
+
+    // 4. Close temp account - lamports go to destination as native SOL
+    const closeIx = getCloseAccountInstruction({
+      account: tempAccount.address,
+      destination,
+      owner: destination,
+    });
+
+    return {
+      instructions: [
+        createTempAccountIx,
+        initTempAccountIx,
+        transferIx,
+        closeIx,
+      ],
+      signers: [tempAccount],
+    };
   }
 
   /**
@@ -519,6 +593,7 @@ export class PositionManager {
   /**
    * Make decrease liquidity V2 instructions
    * @param params - Decrease liquidity parameters
+   * @param params.isNative - Whether to unwrap WSOL to native SOL after decrease
    * @returns Instruction result following Raydium pattern
    */
   async makeDecreaseLiquidityV2Instructions(params: {
@@ -532,6 +607,7 @@ export class PositionManager {
     liquidity: bigint;
     amountMinA: bigint;
     amountMinB: bigint;
+    isNative?: boolean;
   }): Promise<MakeInstructionResult<{}>> {
     const {
       ownerPosition,
@@ -540,7 +616,10 @@ export class PositionManager {
       liquidity,
       amountMinA,
       amountMinB,
+      isNative = false,
     } = params;
+
+    const signers: TransactionSigner[] = [];
 
     const [personalPosition] = await PdaUtils.getPositionStatePda(
       ownerPosition.nftMint,
@@ -612,9 +691,47 @@ export class PositionManager {
       accounts: [...instruction.accounts, ...remAccounts],
     };
 
+    const instructions: Instruction[] = [ixWithRemAccounts];
+
+    // Handle WSOL unwrapping if requested
+    if (isNative) {
+      const destination = ownerInfo.wallet.address;
+      const isFullWithdrawal = liquidity === ownerPosition.liquidity;
+
+      // Determine which token is WSOL
+      const isTokenANative =
+        poolState.data.tokenMint0.toString() === NATIVE_MINT.toString();
+      const wsolAta = isTokenANative
+        ? ownerInfo.tokenAccountA
+        : ownerInfo.tokenAccountB;
+      const amount = isTokenANative ? amountMinA : amountMinB;
+
+      if (isFullWithdrawal) {
+        // Full withdrawal: close the entire WSOL ATA
+        const unwrapIxs = this.buildUnwrapSolInstruction({
+          payer: ownerInfo.wallet,
+          ata: wsolAta,
+          owner: ownerInfo.wallet.address,
+          destination,
+        });
+        instructions.push(...unwrapIxs);
+      } else {
+        // Partial withdrawal
+        const { instructions: partialUnwrapIxs, signers: partialSigners } =
+          await this.buildPartialUnwrapSolInstructions({
+            payer: ownerInfo.wallet,
+            sourceAta: wsolAta,
+            destination,
+            amount,
+          });
+        instructions.push(...partialUnwrapIxs);
+        signers.push(...partialSigners);
+      }
+    }
+
     return {
-      instructions: [ixWithRemAccounts],
-      signers: [],
+      instructions,
+      signers,
       instructionTypes: ["DecreaseLiquidityV2"],
       address: {
         tickArrayLower,
@@ -637,9 +754,8 @@ export class PositionManager {
     ownerInfo: {
       wallet: TransactionSigner;
     };
-    isNative: boolean;
   }): Promise<MakeInstructionResult<{}>> {
-    const { ownerPosition, ownerInfo, isNative } = params;
+    const { ownerPosition, ownerInfo } = params;
 
     const [personalPosition] = await PdaUtils.getPositionStatePda(
       ownerPosition.nftMint,
@@ -658,25 +774,8 @@ export class PositionManager {
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
-    let unrwrapWsolInstructions: Instruction[] = [];
-    if (isNative) {
-      const ownerWallet = ownerInfo.wallet;
-      const [ata] = await findAssociatedTokenPda({
-        mint: address(NATIVE_MINT.toString()),
-        owner: ownerWallet.address,
-        tokenProgram: TOKEN_PROGRAM_ADDRESS,
-      });
-
-      unrwrapWsolInstructions = this.buildUnwrapSolInstruction({
-        payer: ownerWallet,
-        ata,
-        owner: ownerWallet.address,
-        destination: ownerWallet.address,
-      });
-    }
-
     return {
-      instructions: [instruction, ...unrwrapWsolInstructions],
+      instructions: [instruction],
       signers: [],
       instructionTypes: ["ClosePosition"],
       address: { positionNftAccount, personalPosition },
