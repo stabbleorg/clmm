@@ -84,22 +84,6 @@ export class PositionManager {
     ];
   }
 
-  private buildUnwrapSolInstruction(params: {
-    ata: Address;
-    owner: Address;
-    destination: Address;
-  }): Instruction[] {
-    const { owner, destination, ata } = params;
-
-    return [
-      getCloseAccountInstruction({
-        account: ata,
-        destination,
-        owner,
-      }),
-    ];
-  }
-
   /**
    * Build partial unwrap SOL instructions using a temp account:
    * 1. Create temp account
@@ -711,7 +695,6 @@ export class PositionManager {
     // Handle WSOL unwrapping if requested
     if (isNative) {
       const destination = ownerInfo.wallet.address;
-      const isFullWithdrawal = liquidity === ownerPosition.liquidity;
 
       // Determine which token is WSOL
       const isTokenANative =
@@ -721,26 +704,15 @@ export class PositionManager {
         : ownerInfo.tokenAccountB;
       const amount = isTokenANative ? amountMinA : amountMinB;
 
-      if (isFullWithdrawal) {
-        // Full withdrawal: close the entire WSOL ATA
-        const unwrapIxs = this.buildUnwrapSolInstruction({
-          ata: wsolAta,
-          owner: ownerInfo.wallet.address,
+      const { instructions: unwrapIxs, signers: unwrapSigners } =
+        await this.buildPartialUnwrapSolInstructions({
+          payer: ownerInfo.wallet,
+          sourceAta: wsolAta,
           destination,
+          amount,
         });
-        instructions.push(...unwrapIxs);
-      } else {
-        // Partial withdrawal
-        const { instructions: partialUnwrapIxs, signers: partialSigners } =
-          await this.buildPartialUnwrapSolInstructions({
-            payer: ownerInfo.wallet,
-            sourceAta: wsolAta,
-            destination,
-            amount,
-          });
-        instructions.push(...partialUnwrapIxs);
-        signers.push(...partialSigners);
-      }
+      instructions.push(...unwrapIxs);
+      signers.push(...unwrapSigners);
     }
 
     return {
