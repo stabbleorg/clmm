@@ -84,32 +84,6 @@ export class PositionManager {
     ];
   }
 
-  private buildUnwrapSolInstruction(params: {
-    payer: TransactionSigner;
-    ata: Address;
-    owner: Address;
-    destination: Address;
-  }): Instruction[] {
-    const { payer, owner, destination, ata } = params;
-
-    return [
-      // There's a chance user might have deleted the ATA - create it with idempotent just to be sure.
-      getCreateAssociatedTokenIdempotentInstruction({
-        payer,
-        ata,
-        owner,
-        mint: address(NATIVE_MINT.toString()),
-        tokenProgram: TOKEN_PROGRAM_ADDRESS,
-        systemProgram: SYSTEM_PROGRAM_ID,
-      }),
-      getCloseAccountInstruction({
-        account: ata,
-        destination,
-        owner,
-      }),
-    ];
-  }
-
   /**
    * Build partial unwrap SOL instructions using a temp account:
    * 1. Create temp account
@@ -667,6 +641,27 @@ export class PositionManager {
       ? [{ address: extBitmapAccount[0], role: AccountRole.WRITABLE }]
       : [];
 
+    // Create recipient token accounts if they don't exist
+    const createRecipientAta0Ix = getCreateAssociatedTokenIdempotentInstruction(
+      {
+        payer: ownerInfo.wallet,
+        ata: ownerInfo.tokenAccountA,
+        owner: ownerInfo.wallet.address,
+        mint: poolState.data.tokenMint0,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      },
+    );
+
+    const createRecipientAta1Ix = getCreateAssociatedTokenIdempotentInstruction(
+      {
+        payer: ownerInfo.wallet,
+        ata: ownerInfo.tokenAccountB,
+        owner: ownerInfo.wallet.address,
+        mint: poolState.data.tokenMint1,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      },
+    );
+
     const instruction = getDecreaseLiquidityV2Instruction({
       nftOwner: ownerInfo.wallet,
       nftAccount: positionNftAccount,
@@ -691,12 +686,15 @@ export class PositionManager {
       accounts: [...instruction.accounts, ...remAccounts],
     };
 
-    const instructions: Instruction[] = [ixWithRemAccounts];
+    const instructions: Instruction[] = [
+      createRecipientAta0Ix,
+      createRecipientAta1Ix,
+      ixWithRemAccounts,
+    ];
 
     // Handle WSOL unwrapping if requested
     if (isNative) {
       const destination = ownerInfo.wallet.address;
-      const isFullWithdrawal = liquidity === ownerPosition.liquidity;
 
       // Determine which token is WSOL
       const isTokenANative =
@@ -706,27 +704,15 @@ export class PositionManager {
         : ownerInfo.tokenAccountB;
       const amount = isTokenANative ? amountMinA : amountMinB;
 
-      if (isFullWithdrawal) {
-        // Full withdrawal: close the entire WSOL ATA
-        const unwrapIxs = this.buildUnwrapSolInstruction({
+      const { instructions: unwrapIxs, signers: unwrapSigners } =
+        await this.buildPartialUnwrapSolInstructions({
           payer: ownerInfo.wallet,
-          ata: wsolAta,
-          owner: ownerInfo.wallet.address,
+          sourceAta: wsolAta,
           destination,
+          amount,
         });
-        instructions.push(...unwrapIxs);
-      } else {
-        // Partial withdrawal
-        const { instructions: partialUnwrapIxs, signers: partialSigners } =
-          await this.buildPartialUnwrapSolInstructions({
-            payer: ownerInfo.wallet,
-            sourceAta: wsolAta,
-            destination,
-            amount,
-          });
-        instructions.push(...partialUnwrapIxs);
-        signers.push(...partialSigners);
-      }
+      instructions.push(...unwrapIxs);
+      signers.push(...unwrapSigners);
     }
 
     return {
