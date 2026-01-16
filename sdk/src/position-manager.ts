@@ -12,6 +12,7 @@ import {
 import {
   fetchMaybePersonalPositionState,
   fetchMaybePoolState,
+  fetchMaybeTickArrayState,
   getClosePositionInstruction,
   getDecreaseLiquidityV2Instruction,
   getIncreaseLiquidityV2Instruction,
@@ -42,6 +43,8 @@ import {
   getMetadataPda,
   PdaUtils,
   LiquidityMath,
+  PositionUtils,
+  PositionFees,
 } from "./utils";
 import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import BN from "bn.js";
@@ -803,11 +806,13 @@ export class PositionManager {
    * Enrich position state with computed fields from pool data
    * @param position - Raw position state from blockchain
    * @param pool - Pool state from blockchain
+   * @param fees - Position fees
    * @returns Enriched position info with calculated amounts and prices
    */
   enrichPositionInfo(
     position: PersonalPositionState,
     pool: PoolState,
+    fees?: PositionFees,
   ): PositionInfo {
     // Calculate sqrt prices for tick boundaries
     const sqrtPriceLowerX64 = SqrtPriceMath.getSqrtPriceX64FromTick(
@@ -851,8 +856,8 @@ export class PositionManager {
 
     // Map uncollected fees
     const unclaimedFees = {
-      token0: new BN(position.tokenFeesOwed0.toString()),
-      token1: new BN(position.tokenFeesOwed1.toString()),
+      token0: fees?.tokenFees0 ? fees?.tokenFees0 : new BN(0),
+      token1: fees?.tokenFees1 ? fees?.tokenFees1 : new BN(0),
     };
 
     // TODO: Calculate position age from blockchain timestamp
@@ -930,8 +935,10 @@ export class PositionManager {
               return null;
             }
 
+            const fees = await this.getPositionFee(position, poolAccount.data);
+
             // Enrich position with pool data
-            return this.enrichPositionInfo(position, poolAccount.data);
+            return this.enrichPositionInfo(position, poolAccount.data, fees);
           } catch (error) {
             console.error(`Failed to enrich position: ${error}`);
             return null;
@@ -946,5 +953,81 @@ export class PositionManager {
         `Failed to fetch positions for user: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     }
+  }
+
+  async getPositionFee(
+    position: PersonalPositionState,
+    pool: PoolState,
+  ): Promise<PositionFees> {
+    const [tickArrayLower] = await PdaUtils.getTickArrayStatePda(
+      position.poolId,
+      PdaUtils.getTickArrayStartIndex(
+        position.tickLowerIndex,
+        pool.tickSpacing,
+      ),
+    );
+
+    const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
+      position.poolId,
+      PdaUtils.getTickArrayStartIndex(
+        position.tickUpperIndex,
+        pool.tickSpacing,
+      ),
+    );
+
+    const tickArrayLowerAccount = await fetchMaybeTickArrayState(
+      this.config.rpc,
+      tickArrayLower,
+    );
+    const tickArrayUpperAccount = await fetchMaybeTickArrayState(
+      this.config.rpc,
+      tickArrayUpper,
+    );
+
+    if (!tickArrayLowerAccount.exists || !tickArrayUpperAccount.exists) {
+      console.log("[getPositionFee] tick array state accounts do not exist.");
+      return { tokenFees0: new BN(0), tokenFees1: new BN(0) };
+    }
+
+    const tickSpacing = pool.tickSpacing;
+    const tickArrayLowerIndex = TickUtils.getTickOffsetInArray(
+      position.tickLowerIndex,
+      tickSpacing,
+    );
+    const tickArrayUpperIndex = TickUtils.getTickOffsetInArray(
+      position.tickUpperIndex,
+      tickSpacing,
+    );
+
+    if (tickArrayLowerIndex < 0 || tickArrayUpperIndex < 0) {
+      console.log("[getPositionFee] tick array indexes < 0.");
+      return { tokenFees0: new BN(0), tokenFees1: new BN(0) };
+    }
+
+    const lowerTickState =
+      tickArrayLowerAccount.data.ticks[tickArrayLowerIndex];
+    const upperTickState =
+      tickArrayUpperAccount.data.ticks[tickArrayUpperIndex];
+
+    return PositionUtils.getPositionFees({
+      liquidity: position.liquidity,
+      tickLower: position.tickLowerIndex,
+      tickUpper: position.tickUpperIndex,
+      feeGrowthInside0LastX64: position.feeGrowthInside0LastX64,
+      feeGrowthInside1LastX64: position.feeGrowthInside1LastX64,
+      tokenFeesOwed0: position.tokenFeesOwed0,
+      tokenFeesOwed1: position.tokenFeesOwed1,
+      tickCurrent: pool.tickCurrent,
+      feeGrowthGlobal0X64: pool.feeGrowthGlobal0X64,
+      feeGrowthGlobal1X64: pool.feeGrowthGlobal1X64,
+      tickLowerState: {
+        feeGrowthOutside0X64: lowerTickState.feeGrowthOutside0X64,
+        feeGrowthOutside1X64: lowerTickState.feeGrowthOutside1X64,
+      },
+      tickUpperState: {
+        feeGrowthOutside0X64: upperTickState.feeGrowthOutside0X64,
+        feeGrowthOutside1X64: upperTickState.feeGrowthOutside1X64,
+      },
+    });
   }
 }

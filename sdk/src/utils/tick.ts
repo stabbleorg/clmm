@@ -113,6 +113,26 @@ export class TickUtils {
     }
   }
 
+  public static getTickOffsetInArray(
+    tickIndex: number,
+    tickSpacing: number,
+  ): number {
+    if (tickIndex % tickSpacing != 0) {
+      throw new Error("tickIndex % tickSpacing not equal 0");
+    }
+    const startTickIndex = TickUtils.getTickArrayStartIndexByTick(
+      tickIndex,
+      tickSpacing,
+    );
+    const offsetInArray = Math.floor(
+      (tickIndex - startTickIndex) / tickSpacing,
+    );
+    if (offsetInArray < 0 || offsetInArray >= TICK_ARRAY_SIZE) {
+      throw new Error("tick offset in array overflow");
+    }
+    return offsetInArray;
+  }
+
   /**
    * Get the start index of the tick array containing a specific tick
    * @param tick - Target tick
