@@ -1,8 +1,6 @@
 import BN from "bn.js";
 import { MathUtils } from "./math";
 import { Q64 } from "../constants";
-import { TickArrayState, TickState } from "../generated";
-import { TICK_ARRAY_SIZE, TickArray } from "./tick";
 
 /**
  * Pending fees for a position in both tokens.
@@ -244,51 +242,5 @@ export class PositionUtils {
       tokenFees0: feesOwed0.add(feeAmount0),
       tokenFees1: feesOwed1.add(feeAmount1),
     };
-  }
-
-  /**
-   * Convenience method to calculate position fees from on-chain account data.
-   *
-   * @param params - On-chain account data
-   * @returns Pending fees for both tokens
-   */
-  static getPositionFeesFromAccounts(params: {
-    /** Personal position state account data */
-    position: {
-      liquidity: bigint;
-      tickLowerIndex: number;
-      tickUpperIndex: number;
-      feeGrowthInside0LastX64: bigint;
-      feeGrowthInside1LastX64: bigint;
-      tokenFeesOwed0: bigint;
-      tokenFeesOwed1: bigint;
-    };
-    /** Pool state account data */
-    pool: {
-      tickCurrent: number;
-      feeGrowthGlobal0X64: bigint;
-      feeGrowthGlobal1X64: bigint;
-    };
-    /** Tick state for position's lower tick */
-    tickLowerState: TickFeeState;
-    /** Tick state for position's upper tick */
-    tickUpperState: TickFeeState;
-  }): PositionFees {
-    const { position, pool, tickLowerState, tickUpperState } = params;
-
-    return PositionUtils.getPositionFees({
-      liquidity: position.liquidity,
-      tickLower: position.tickLowerIndex,
-      tickUpper: position.tickUpperIndex,
-      feeGrowthInside0LastX64: position.feeGrowthInside0LastX64,
-      feeGrowthInside1LastX64: position.feeGrowthInside1LastX64,
-      tokenFeesOwed0: position.tokenFeesOwed0,
-      tokenFeesOwed1: position.tokenFeesOwed1,
-      tickCurrent: pool.tickCurrent,
-      feeGrowthGlobal0X64: pool.feeGrowthGlobal0X64,
-      feeGrowthGlobal1X64: pool.feeGrowthGlobal1X64,
-      tickLowerState,
-      tickUpperState,
-    });
   }
 }
