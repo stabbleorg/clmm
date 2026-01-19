@@ -13,6 +13,14 @@ export interface PositionFees {
 }
 
 /**
+ * Pending rewards for a position (up to 3 reward tokens).
+ */
+export interface PositionRewards {
+  /** Pending rewards for each reward token */
+  rewards: BN[];
+}
+
+/**
  * Fee growth inside a position's tick range.
  */
 export interface FeeGrowthInside {
@@ -28,6 +36,34 @@ export interface FeeGrowthInside {
 export interface TickFeeState {
   feeGrowthOutside0X64: bigint;
   feeGrowthOutside1X64: bigint;
+}
+
+/**
+ * Tick state with reward growth outside values.
+ */
+export interface TickRewardState {
+  /** Total liquidity referencing this tick */
+  liquidityGross: bigint;
+  /** Reward growth outside for each reward token (X64 fixed-point) */
+  rewardGrowthsOutsideX64: bigint[];
+}
+
+/**
+ * Pool reward info for calculating position rewards.
+ */
+export interface PoolRewardInfo {
+  /** Global reward growth (X64 fixed-point) */
+  rewardGrowthGlobalX64: bigint;
+}
+
+/**
+ * Position reward info from on-chain state.
+ */
+export interface PositionRewardInfoState {
+  /** Last recorded reward growth inside (X64 fixed-point) */
+  growthInsideLastX64: bigint;
+  /** Accumulated reward amount owed */
+  rewardAmountOwed: bigint;
 }
 
 /**
@@ -242,5 +278,190 @@ export class PositionUtils {
       tokenFees0: feesOwed0.add(feeAmount0),
       tokenFees1: feesOwed1.add(feeAmount1),
     };
+  }
+
+  /**
+   * Calculate reward growth inside a position's tick range for all reward tokens.
+   *
+   * Formula:
+   * ```
+   * rewardGrowthInside = rewardGrowthGlobal - rewardGrowthBelow - rewardGrowthAbove
+   * ```
+   *
+   * Special cases:
+   * - If tickLower has no liquidity (liquidityGross = 0), rewardGrowthBelow = rewardGrowthGlobal
+   * - If tickUpper has no liquidity (liquidityGross = 0), rewardGrowthAbove = 0
+   *
+   * @param params - Parameters for reward growth calculation
+   * @returns Reward growth inside for each reward token (X64 fixed-point)
+   */
+  static getRewardGrowthInside(params: {
+    /** Current pool tick */
+    tickCurrent: number;
+    /** Position lower tick index */
+    tickLower: number;
+    /** Position upper tick index */
+    tickUpper: number;
+    /** Tick state for lower tick boundary */
+    tickLowerState: TickRewardState;
+    /** Tick state for upper tick boundary */
+    tickUpperState: TickRewardState;
+    /** Pool reward infos (up to 3) */
+    rewardInfos: PoolRewardInfo[];
+  }): BN[] {
+    const {
+      tickCurrent,
+      tickLower,
+      tickUpper,
+      tickLowerState,
+      tickUpperState,
+      rewardInfos,
+    } = params;
+
+    const rewardGrowthsInside: BN[] = [];
+
+    for (let i = 0; i < rewardInfos.length; i++) {
+      const rewardGrowthGlobal = new BN(
+        rewardInfos[i].rewardGrowthGlobalX64.toString(),
+      );
+
+      // Calculate reward growth below the position's lower tick
+      let rewardGrowthBelow: BN;
+      if (tickLowerState.liquidityGross === 0n) {
+        // If tick has no liquidity, assume all growth is below
+        rewardGrowthBelow = rewardGrowthGlobal;
+      } else if (tickCurrent < tickLower) {
+        // Current tick is below lower tick
+        // Reward growth below = global - outside
+        rewardGrowthBelow = rewardGrowthGlobal.sub(
+          new BN(tickLowerState.rewardGrowthsOutsideX64[i].toString()),
+        );
+      } else {
+        // Current tick is at or above lower tick
+        // Reward growth below = outside
+        rewardGrowthBelow = new BN(
+          tickLowerState.rewardGrowthsOutsideX64[i].toString(),
+        );
+      }
+
+      // Calculate reward growth above the position's upper tick
+      let rewardGrowthAbove: BN;
+      if (tickUpperState.liquidityGross === 0n) {
+        // If tick has no liquidity, assume no growth is above
+        rewardGrowthAbove = new BN(0);
+      } else if (tickCurrent < tickUpper) {
+        // Current tick is below upper tick
+        // Reward growth above = outside
+        rewardGrowthAbove = new BN(
+          tickUpperState.rewardGrowthsOutsideX64[i].toString(),
+        );
+      } else {
+        // Current tick is at or above upper tick
+        // Reward growth above = global - outside
+        rewardGrowthAbove = rewardGrowthGlobal.sub(
+          new BN(tickUpperState.rewardGrowthsOutsideX64[i].toString()),
+        );
+      }
+
+      // Reward growth inside = global - below - above (with wrapping)
+      const rewardGrowthInside = MathUtils.wrappingSubU128(
+        MathUtils.wrappingSubU128(rewardGrowthGlobal, rewardGrowthBelow),
+        rewardGrowthAbove,
+      );
+
+      rewardGrowthsInside.push(rewardGrowthInside);
+    }
+
+    return rewardGrowthsInside;
+  }
+
+  /**
+   * Calculate pending rewards for a position.
+   *
+   * Formula:
+   * ```
+   * rewardDelta = (rewardGrowthInside - rewardGrowthInsideLast) × liquidity / 2^64
+   * totalReward = rewardAmountOwed + rewardDelta
+   * ```
+   *
+   * @param params - Parameters for reward calculation
+   * @returns Pending rewards for each reward token in native units
+   */
+  static getPositionRewards(params: {
+    /** Position liquidity */
+    liquidity: bigint;
+    /** Position's tick lower index */
+    tickLower: number;
+    /** Position's tick upper index */
+    tickUpper: number;
+    /** Position's reward info (last recorded growth and owed amounts) */
+    positionRewardInfos: PositionRewardInfoState[];
+    /** Current pool tick */
+    tickCurrent: number;
+    /** Pool reward infos */
+    rewardInfos: PoolRewardInfo[];
+    /** Tick state for lower tick boundary */
+    tickLowerState: TickRewardState;
+    /** Tick state for upper tick boundary */
+    tickUpperState: TickRewardState;
+  }): PositionRewards {
+    const {
+      liquidity,
+      tickLower,
+      tickUpper,
+      positionRewardInfos,
+      tickCurrent,
+      rewardInfos,
+      tickLowerState,
+      tickUpperState,
+    } = params;
+
+    // Get current reward growth inside the position's range
+    const rewardGrowthsInside = PositionUtils.getRewardGrowthInside({
+      tickCurrent,
+      tickLower,
+      tickUpper,
+      tickLowerState,
+      tickUpperState,
+      rewardInfos,
+    });
+
+    const liquidityBN = new BN(liquidity.toString());
+    const rewards: BN[] = [];
+
+    for (let i = 0; i < rewardGrowthsInside.length; i++) {
+      const rewardGrowthInside = rewardGrowthsInside[i];
+      const positionRewardInfo = positionRewardInfos[i];
+
+      if (!positionRewardInfo) {
+        rewards.push(new BN(0));
+        continue;
+      }
+
+      const growthInsideLast = new BN(
+        positionRewardInfo.growthInsideLastX64.toString(),
+      );
+      const rewardAmountOwed = new BN(
+        positionRewardInfo.rewardAmountOwed.toString(),
+      );
+
+      // Calculate reward growth delta (with wrapping for overflow handling)
+      const rewardGrowthDelta = MathUtils.wrappingSubU128(
+        rewardGrowthInside,
+        growthInsideLast,
+      );
+
+      // Calculate reward amount: delta × liquidity / 2^64
+      const rewardAmountDelta = MathUtils.mulDivFloor(
+        rewardGrowthDelta,
+        liquidityBN,
+        Q64,
+      );
+
+      // Total reward = previously owed + new rewards
+      rewards.push(rewardAmountOwed.add(rewardAmountDelta));
+    }
+
+    return { rewards };
   }
 }

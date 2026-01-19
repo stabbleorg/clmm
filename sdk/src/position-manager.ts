@@ -45,6 +45,7 @@ import {
   LiquidityMath,
   PositionUtils,
   PositionFees,
+  PositionRewards,
 } from "./utils";
 import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import BN from "bn.js";
@@ -813,6 +814,7 @@ export class PositionManager {
     position: PersonalPositionState,
     pool: PoolState,
     fees?: PositionFees,
+    rewards?: PositionRewards,
   ): PositionInfo {
     // Calculate sqrt prices for tick boundaries
     const sqrtPriceLowerX64 = SqrtPriceMath.getSqrtPriceX64FromTick(
@@ -860,6 +862,19 @@ export class PositionManager {
       token1: fees?.tokenFees1 ? fees?.tokenFees1 : new BN(0),
     };
 
+    // Map uncollected rewards with their mint addresses
+    const unclaimedRewards = rewards?.rewards
+      ? (rewards.rewards
+          .map((amount, i) => ({
+            mint: pool.rewardInfos[i]?.tokenMint,
+            amount,
+          }))
+          .filter((r) => r.mint !== undefined) as Array<{
+          mint: Address;
+          amount: BN;
+        }>)
+      : undefined;
+
     // TODO: Calculate position age from blockchain timestamp
     // For now, set to 0 as we don't have creation timestamp readily available
     const ageSeconds = 0;
@@ -875,10 +890,8 @@ export class PositionManager {
       inRange,
       ageSeconds,
       unclaimedFees,
-      // valueUsd is optional and requires external price feeds
+      unclaimedRewards,
       valueUsd: undefined,
-      // unclaimedRewards is optional
-      unclaimedRewards: undefined,
     };
   }
 
@@ -935,10 +948,18 @@ export class PositionManager {
               return null;
             }
 
-            const fees = await this.getPositionFee(position, poolAccount.data);
+            const { fees, rewards } = await this.getPositionFeeAndRewards(
+              position,
+              poolAccount.data,
+            );
 
             // Enrich position with pool data
-            return this.enrichPositionInfo(position, poolAccount.data, fees);
+            return this.enrichPositionInfo(
+              position,
+              poolAccount.data,
+              fees,
+              rewards,
+            );
           } catch (error) {
             console.error(`Failed to enrich position: ${error}`);
             return null;
@@ -955,10 +976,17 @@ export class PositionManager {
     }
   }
 
-  async getPositionFee(
+  /**
+   * Calculate pending fees and rewards for a position.
+   *
+   * @param position - Personal position state
+   * @param pool - Pool state
+   * @returns Pending fees for both tokens and rewards for each reward token (up to 3)
+   */
+  async getPositionFeeAndRewards(
     position: PersonalPositionState,
     pool: PoolState,
-  ): Promise<PositionFees> {
+  ): Promise<{ fees: PositionFees; rewards: PositionRewards }> {
     const [tickArrayLower] = await PdaUtils.getTickArrayStatePda(
       position.poolId,
       PdaUtils.getTickArrayStartIndex(
@@ -985,8 +1013,13 @@ export class PositionManager {
     );
 
     if (!tickArrayLowerAccount.exists || !tickArrayUpperAccount.exists) {
-      console.log("[getPositionFee] tick array state accounts do not exist.");
-      return { tokenFees0: new BN(0), tokenFees1: new BN(0) };
+      console.log(
+        "[getPositionFeeAndRewards] tick array state accounts do not exist.",
+      );
+      return {
+        fees: { tokenFees0: new BN(0), tokenFees1: new BN(0) },
+        rewards: { rewards: [new BN(0), new BN(0), new BN(0)] },
+      };
     }
 
     const tickSpacing = pool.tickSpacing;
@@ -1000,8 +1033,11 @@ export class PositionManager {
     );
 
     if (tickArrayLowerIndex < 0 || tickArrayUpperIndex < 0) {
-      console.log("[getPositionFee] tick array indexes < 0.");
-      return { tokenFees0: new BN(0), tokenFees1: new BN(0) };
+      console.log("[getPositionFeeAndRewards] tick array indexes < 0.");
+      return {
+        fees: { tokenFees0: new BN(0), tokenFees1: new BN(0) },
+        rewards: { rewards: [new BN(0), new BN(0), new BN(0)] },
+      };
     }
 
     const lowerTickState =
@@ -1009,7 +1045,8 @@ export class PositionManager {
     const upperTickState =
       tickArrayUpperAccount.data.ticks[tickArrayUpperIndex];
 
-    return PositionUtils.getPositionFees({
+    // Calculate fees
+    const fees = PositionUtils.getPositionFees({
       liquidity: position.liquidity,
       tickLower: position.tickLowerIndex,
       tickUpper: position.tickUpperIndex,
@@ -1029,5 +1066,25 @@ export class PositionManager {
         feeGrowthOutside1X64: upperTickState.feeGrowthOutside1X64,
       },
     });
+
+    // Calculate rewards
+    const rewards = PositionUtils.getPositionRewards({
+      liquidity: position.liquidity,
+      tickLower: position.tickLowerIndex,
+      tickUpper: position.tickUpperIndex,
+      positionRewardInfos: position.rewardInfos,
+      tickCurrent: pool.tickCurrent,
+      rewardInfos: pool.rewardInfos,
+      tickLowerState: {
+        liquidityGross: lowerTickState.liquidityGross,
+        rewardGrowthsOutsideX64: lowerTickState.rewardGrowthsOutsideX64,
+      },
+      tickUpperState: {
+        liquidityGross: upperTickState.liquidityGross,
+        rewardGrowthsOutsideX64: upperTickState.rewardGrowthsOutsideX64,
+      },
+    });
+
+    return { fees, rewards };
   }
 }
