@@ -119,4 +119,12 @@ pub enum ErrorCode {
     DifferentPoolTickArrayAccount,
     #[msg("Invalid start tick index provided.")]
     InvalidStartTick,
+
+    // Account Errors
+    #[msg("Invalid account discriminator")]
+    AccountDiscriminatorNotFound,
+    #[msg("Account does not have the expected discriminator")]
+    AccountDiscriminatorMismatch,
+    #[msg("Account isn't owned by our program")]
+    AccountOwnedByWrongProgram,
 }

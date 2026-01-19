@@ -30,7 +30,7 @@ pub struct TickArrayState {
     pub padding: [u8; 107],
 }
 
-impl TickArrayState {
+impl FixedTickArray {
     pub const LEN: usize = 8 + 32 + 4 + TickState::LEN * TICK_ARRAY_SIZE_USIZE + 1 + 115;
 
     pub fn key(&self) -> Pubkey {

@@ -1,14 +1,14 @@
 use std::{
     cell::{Ref, RefMut},
-    ops::{Deref, DerefMut},
-    convert::identity
+    convert::identity,
+    ops::{Deref, DerefMut}
 };
 
 use crate::error::ErrorCode as StabbleErrorCode;
-use anchor_lang::{prelude::*, Discriminator};
+use anchor_lang::{prelude::*, system_program, Discriminator};
 use arrayref::array_ref;
 use crate::libraries::{MAX_TICK, MIN_TICK};
-use crate::states::{DynamicTickArray, DynamicTickArrayLoader, FixedTickArray, RewardInfo, Tick, TickState, TickUpdate, REWARD_NUM};
+use crate::states::{DynamicTickArray, DynamicTickArrayLoader, FixedTickArray, PoolState, RewardInfo, Tick, TickUpdate, REWARD_NUM};
 
 pub const TICK_ARRAY_SEED: &str = "tick_array";
 pub const TICK_ARRAY_SIZE: i32 = 60;
@@ -360,4 +360,51 @@ pub fn get_reward_growths_inside(
     }
 
     reward_growths_inside
+}
+
+// Why not use anchor's `init-if-needed` to create?
+// Beacuse `tick_array_lower` and `tick_array_upper` can be the same account, anchor can initialze tick_array_lower, but it causes a crash when anchor to initialze the `tick_array_upper`,
+// the problem is variable scope, tick_array_lower_loader not exit to save the discriminator while build tick_array_upper_loader.
+// Helper function to get or create tick array based on discriminator
+pub fn get_or_create_tick_array_by_discriminator<'info>(
+    payer: AccountInfo<'info>,
+    tick_array_account_info: AccountInfo<'info>,
+    system_program: AccountInfo<'info>,
+    pool_state_loader: &AccountLoader<'info, PoolState>,
+    tick_array_start_index: i32,
+    tick_spacing: u16,
+) -> Result<AccountInfo<'info>> {
+    // Check if account exists and has a discriminator
+    let is_dynamic = if tick_array_account_info.owner == &system_program::ID {
+        // Account doesn't exist yet - default to fixed for backward compatibility
+        false
+    } else {
+        // Account exists - check discriminator
+        let account_data = tick_array_account_info.try_borrow_data()?;
+        if account_data.len() < 8 {
+            return Err(crate::error::ErrorCode::AccountDiscriminatorNotFound.into());
+        }
+        let discriminator = array_ref![account_data, 0, 8];
+        discriminator == &DynamicTickArray::DISCRIMINATOR
+    };
+
+    if is_dynamic {
+        DynamicTickArrayLoader::get_or_create_tick_array(
+            payer,
+            tick_array_account_info,
+            system_program,
+            pool_state_loader,
+            tick_array_start_index,
+            tick_spacing,
+        )
+    } else {
+        FixedTickArray::get_or_create_tick_array(
+            payer,
+            tick_array_account_info,
+            system_program,
+            pool_state_loader,
+            tick_array_start_index,
+            tick_spacing,
+        ).map(|loader| loader.to_account_info())
+    }
 }

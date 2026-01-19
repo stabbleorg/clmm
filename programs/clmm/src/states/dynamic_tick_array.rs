@@ -3,7 +3,9 @@ use anchor_lang::{prelude::*, system_program};
 use arrayref::array_ref;
 use crate::error::ErrorCode;
 use crate::libraries::liquidity_math;
-use crate::states::{PoolState, RewardInfo, Tick, TickArrayType, TickState, TickUpdate, REWARD_NUM, TICK_ARRAY_SIZE, TICK_ARRAY_SIZE_USIZE};
+use crate::states::{PoolState, RewardInfo, Tick, TickArrayType, TickState, TickUpdate, REWARD_NUM, TICK_ARRAY_SIZE, TICK_ARRAY_SIZE_USIZE, TICK_ARRAY_SEED};
+use crate::util::create_or_allocate_account;
+use crate::Result;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Debug, PartialEq, Copy)]
 pub struct DynamicTickData {
@@ -218,21 +220,107 @@ impl DynamicTickArrayLoader {
     const TICK_BITMAP_OFFSET: usize = Self::POOL_OFFSET + 32;
     const TICK_DATA_OFFSET: usize = Self::TICK_BITMAP_OFFSET + 16;
 
-    // pub fn initialize(
-    //     &mut self,
-    //     pool: &Account<PoolState>,
-    //     start_tick_index: i32,
-    // ) -> Result<()> {
-    //     if !Tick::check_is_valid_start_tick(start_tick_index, pool.tick_spacing) {
-    //         return Err(ErrorCode::InvalidStartTick.into());
-    //     }
-    //
-    //     self.0[Self::START_TICK_INDEX_OFFSET..Self::START_TICK_INDEX_OFFSET + 4]
-    //         .copy_from_slice(&start_tick_index.to_le_bytes());
-    //     self.0[Self::POOL_OFFSET..Self::POOL_OFFSET + 32]
-    //         .copy_from_slice(&pool.key().to_bytes());
-    //     Ok(())
-    // }
+    /// Load a DynamicTickArrayLoader from tick array account info, if tick array account does not exist, then create it.
+    pub fn get_or_create_tick_array<'info>(
+        payer: AccountInfo<'info>,
+        tick_array_account_info: AccountInfo<'info>,
+        system_program: AccountInfo<'info>,
+        pool_state_loader: &AccountLoader<'info, PoolState>,
+        tick_array_start_index: i32,
+        tick_spacing: u16,
+    ) -> Result<AccountInfo<'info>> {
+        // Use TickArrayState's validation function since it's shared logic
+        use crate::states::fixed_tick_array::TickArrayState;
+        require!(
+            TickArrayState::check_is_valid_start_index(tick_array_start_index, tick_spacing),
+            ErrorCode::InvalidTickIndex
+        );
+
+        if tick_array_account_info.owner == &system_program::ID {
+            let (expect_pda_address, bump) = Pubkey::find_program_address(
+                &[
+                    TICK_ARRAY_SEED.as_bytes(),
+                    pool_state_loader.key().as_ref(),
+                    &tick_array_start_index.to_be_bytes(),
+                ],
+                &crate::id(),
+            );
+            require_keys_eq!(expect_pda_address, tick_array_account_info.key());
+            
+            // Create or allocate account with MIN_LEN (starts with no initialized ticks)
+            create_or_allocate_account(
+                &crate::id(),
+                payer,
+                system_program,
+                tick_array_account_info.clone(),
+                &[
+                    TICK_ARRAY_SEED.as_bytes(),
+                    pool_state_loader.key().as_ref(),
+                    &tick_array_start_index.to_be_bytes(),
+                    &[bump],
+                ],
+                DynamicTickArray::MIN_LEN,
+            )?;
+
+            // Initialize the account data
+            let mut account_data = tick_array_account_info.try_borrow_mut_data()?;
+            
+            // Write discriminator
+            account_data[..8].copy_from_slice(&DynamicTickArray::DISCRIMINATOR);
+            
+            // Write start_tick_index (little-endian)
+            account_data[8 + Self::START_TICK_INDEX_OFFSET..8 + Self::START_TICK_INDEX_OFFSET + 4]
+                .copy_from_slice(&tick_array_start_index.to_le_bytes());
+            
+            // Write pool_id
+            account_data[8 + Self::POOL_OFFSET..8 + Self::POOL_OFFSET + 32]
+                .copy_from_slice(&pool_state_loader.key().to_bytes());
+            
+            // Initialize tick_bitmap to 0 (no ticks initialized)
+            account_data[8 + Self::TICK_BITMAP_OFFSET..8 + Self::TICK_BITMAP_OFFSET + 16]
+                .copy_from_slice(&0u128.to_le_bytes());
+            
+            // Tick data is already zero-initialized (all uninitialized ticks)
+        } else {
+            // Verify the account is owned by our program
+            require_keys_eq!(
+                tick_array_account_info.owner.clone(),
+                crate::id().clone(),
+                ErrorCode::AccountOwnedByWrongProgram
+            );
+            
+            // Verify discriminator matches
+            let account_data = tick_array_account_info.try_borrow_data()?;
+            require!(
+                account_data.len() >= 8,
+                ErrorCode::AccountDiscriminatorNotFound
+            );
+            let discriminator = array_ref![account_data, 0, 8];
+            require!(
+                discriminator == &DynamicTickArray::DISCRIMINATOR,
+                ErrorCode::AccountDiscriminatorMismatch
+            );
+        }
+        
+        Ok(tick_array_account_info)
+    }
+
+    /// Initialize only can be called when first created
+    pub fn initialize(
+        &mut self,
+        start_index: i32,
+        tick_spacing: u16,
+        pool_key: Pubkey,
+    ) -> Result<()> {
+        use crate::states::fixed_tick_array::TickArrayState;
+        TickArrayState::check_is_valid_start_index(start_index, tick_spacing);
+        self.0[Self::START_TICK_INDEX_OFFSET..Self::START_TICK_INDEX_OFFSET + 4]
+            .copy_from_slice(&start_index.to_le_bytes());
+        self.0[Self::POOL_OFFSET..Self::POOL_OFFSET + 32]
+            .copy_from_slice(&pool_key.to_bytes());
+        // tick_bitmap is already 0 (initialized in get_or_create_tick_array)
+        Ok(())
+    }
 
     fn tick_data(&self) -> &[u8] {
         &self.0[Self::TICK_DATA_OFFSET..]

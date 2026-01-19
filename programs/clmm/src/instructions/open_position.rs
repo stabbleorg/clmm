@@ -24,7 +24,9 @@ use std::cell::RefMut;
 #[cfg(feature = "enable-log")]
 use std::convert::identity;
 use std::ops::Deref;
+use anchor_lang::solana_program::system_program;
 use crate::instructions::modify_position;
+use arrayref::array_ref;
 
 pub fn open_position<'a, 'b, 'c: 'info, 'info>(
     payer: &'b Signer<'info>,
@@ -80,10 +82,7 @@ pub fn open_position<'a, 'b, 'c: 'info, 'info>(
             pool_state.tick_spacing,
         )?;
 
-        // Why not use anchor's `init-if-needed` to create?
-        // Beacuse `tick_array_lower` and `tick_array_upper` can be the same account, anchor can initialze tick_array_lower but it causes a crash when anchor to initialze the `tick_array_upper`,
-        // the problem is variable scope, tick_array_lower_loader not exit to save the discriminator while build tick_array_upper_loader.
-        let tick_array_lower_loader = TickArrayState::get_or_create_tick_array(
+        let tick_array_lower_info = get_or_create_tick_array_by_discriminator(
             payer.to_account_info(),
             tick_array_lower_loader.to_account_info(),
             system_program.to_account_info(),
@@ -92,11 +91,11 @@ pub fn open_position<'a, 'b, 'c: 'info, 'info>(
             pool_state.tick_spacing,
         )?;
 
-        let tick_array_upper_loader =
+        let tick_array_upper_info = 
             if tick_array_lower_start_index == tick_array_upper_start_index {
-                AccountLoad::<TickArrayState>::try_from(&tick_array_upper_loader.to_account_info())?
+                tick_array_lower_info.clone()
             } else {
-                TickArrayState::get_or_create_tick_array(
+                get_or_create_tick_array_by_discriminator(
                     payer.to_account_info(),
                     tick_array_upper_loader.to_account_info(),
                     system_program.to_account_info(),
@@ -126,8 +125,8 @@ pub fn open_position<'a, 'b, 'c: 'info, 'info>(
             token_account_1,
             token_vault_0,
             token_vault_1,
-            &tick_array_lower_loader,
-            &tick_array_upper_loader,
+            &tick_array_lower_info,
+            &tick_array_upper_info,
             token_program_2022,
             token_program,
             vault_0_mint,
@@ -286,65 +285,87 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     if let Some(upper_array) = tick_upper_array.as_ref() {
         require_keys_eq!(upper_array.pool(), pool_state.key());
         // check if upper tick == 0
-        if
     }
-    let tick_lower = tick_lower_array.get_tick(tick_lower_index, pool_state.tick_spacing);
-    // get tick_state
-    let mut tick_lower_state = *tick_array_lower_loader
-        .load_mut()?
-        .get_tick_state_mut(tick_lower_index, pool_state.tick_spacing)?;
-    let mut tick_upper_state = *tick_array_upper_loader
-        .load_mut()?
-        .get_tick_state_mut(tick_upper_index, pool_state.tick_spacing)?;
-    // If the tickState is not initialized, assign a value to tickState.tick here
-    if tick_lower_state.tick == 0 {
-        tick_lower_state.tick = tick_lower_index;
-    }
-    if tick_upper_state.tick == 0 {
-        tick_upper_state.tick = tick_upper_index;
-    }
+    
+    // Determine if upper and lower arrays are the same before moving tick_upper_array
+    let is_same_array = tick_array_lower_info.key() == tick_array_upper_info.key();
+    
+    // Capture upper array information before moving tick_upper_array
+    let (upper_before_init_tick_count, upper_is_variable_size, upper_start_tick_index) = if is_same_array {
+        (
+            tick_lower_array.initialized_tick_count(),
+            tick_lower_array.is_variable_size(),
+            tick_lower_array.start_tick_index(),
+        )
+    } else {
+        let upper_array_ref = tick_upper_array.as_ref().unwrap();
+        (
+            upper_array_ref.initialized_tick_count(),
+            upper_array_ref.is_variable_size(),
+            upper_array_ref.start_tick_index(),
+        )
+    };
+    
+    // modify_position handles tick updates via TickArrayType trait, which works with both fixed and dynamic arrays
     let clock = Clock::get()?;
     let mut result = modify_position::modify_position(
         i128::try_from(*liquidity).unwrap(),
         pool_state,
-        &mut tick_lower_state,
-        &mut tick_upper_state,
+        tick_lower_array,
+        tick_upper_array,
+        tick_lower_index,
+        tick_upper_index,
         clock.unix_timestamp as u64,
     )?;
 
-    // update tick_state
-    tick_array_lower_loader.load_mut()?.update_tick_state(
-        tick_lower_index,
-        pool_state.tick_spacing,
-        tick_lower_state,
-    )?;
-    tick_array_upper_loader.load_mut()?.update_tick_state(
-        tick_upper_index,
-        pool_state.tick_spacing,
-        tick_upper_state,
-    )?;
-
+    // Handle tick array bitmap updates when ticks are flipped
     if result.tick_lower_flipped {
-        let mut tick_array_lower = tick_array_lower_loader.load_mut()?;
-        let before_init_tick_count = tick_array_lower.initialized_tick_count();
-        tick_array_lower.update_initialized_tick_count(true)?;
+        let before_init_tick_count = tick_lower_array.initialized_tick_count();
+        
+        // For fixed arrays, update initialized_tick_count
+        // Check if it's a fixed array by checking is_variable_size
+        if !tick_lower_array.is_variable_size() {
+            // It's a fixed array, load it as FixedTickArray and update the count
+            let fixed_loader = AccountLoad::<FixedTickArray>::try_from_unchecked(
+                &crate::id(),
+                tick_array_lower_info,
+            )?;
+            fixed_loader.load_mut()?.update_initialized_tick_count(true)?;
+        }
+        // For dynamic arrays, initialized_tick_count is computed from bitmap, so no update needed
 
         if before_init_tick_count == 0 {
             pool_state.flip_tick_array_bit(
                 tick_array_bitmap_extension,
-                tick_array_lower.start_tick_index,
+                tick_lower_array.start_tick_index(),
             )?;
         }
     }
     if result.tick_upper_flipped {
-        let mut tick_array_upper = tick_array_upper_loader.load_mut()?;
-        let before_init_tick_count = tick_array_upper.initialized_tick_count();
-        tick_array_upper.update_initialized_tick_count(true)?;
+        // Use the captured information instead of trying to access tick_upper_array after it was moved
+        let before_init_tick_count = upper_before_init_tick_count;
+        
+        // For fixed arrays, update initialized_tick_count
+        // Check if it's a fixed array by checking is_variable_size
+        if !upper_is_variable_size {
+            // It's a fixed array, load it as FixedTickArray and update the count
+            let tick_array_info = if is_same_array {
+                tick_array_lower_info
+            } else {
+                tick_array_upper_info
+            };
+            let fixed_loader = AccountLoad::<FixedTickArray>::try_from_unchecked(
+                &crate::id(),
+                tick_array_info,
+            )?;
+            fixed_loader.load_mut()?.update_initialized_tick_count(true)?;
+        }
+        // For dynamic arrays, initialized_tick_count is computed from bitmap, so no update needed
 
         if before_init_tick_count == 0 {
             pool_state.flip_tick_array_bit(
                 tick_array_bitmap_extension,
-                tick_array_upper.start_tick_index,
+                upper_start_tick_index,
             )?;
         }
     }
@@ -643,6 +664,8 @@ pub fn initialize_token_metadata_extension<'info>(
     Ok(())
 }
 
+
+/// TODO: Fix tests
 #[cfg(test)]
 mod modify_position_test {
     use crate::instructions::modify_position::modify_legacy_position;
