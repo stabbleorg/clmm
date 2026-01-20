@@ -7,6 +7,7 @@ export * from "./math";
 export * from "./pda";
 export * from "./tick";
 export * from "./pool";
+export * from "./position";
 
 // Additional utility functions that don't warrant separate modules
 
