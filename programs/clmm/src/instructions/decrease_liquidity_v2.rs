@@ -43,9 +43,11 @@ pub struct DecreaseLiquidityV2<'info> {
     pub token_vault_1: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Stores init state for the lower tick
+    /// CHECK: can be both fixed or dynamic
     pub tick_array_lower: UncheckedAccount<'info>,
 
     /// Stores init state for the upper tick
+    /// CHECK: can be both fixed or dynamic
     pub tick_array_upper: UncheckedAccount<'info>,
 
     /// The destination token account for receive amount_0
@@ -68,7 +70,7 @@ pub struct DecreaseLiquidityV2<'info> {
     pub token_program_2022: Program<'info, Token2022>,
 
     /// memo program
-    /// CHECK:
+    /// CHECK: memo program id, we don't need to check the memo program
     #[account(
         address = spl_memo::id()
     )]

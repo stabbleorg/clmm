@@ -28,9 +28,11 @@ pub struct IncreaseLiquidityV2<'info> {
     pub personal_position: Box<Account<'info, PersonalPositionState>>,
 
     /// Stores init state for the lower tick
+    /// CHECK: can be both fixed or dynamic
     pub tick_array_lower: UncheckedAccount<'info>,
 
     /// Stores init state for the upper tick
+    /// CHECK: can be both fixed or dynamic
     pub tick_array_upper: UncheckedAccount<'info>,
 
     /// The payer's token account for token_0

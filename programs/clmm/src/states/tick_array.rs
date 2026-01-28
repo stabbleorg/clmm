@@ -231,19 +231,6 @@ impl<'a> TickArraysMut<'a> {
         }
     }
 
-    // Since we can only borrow mutably once, we return None if the upper tick array
-    // is the same as the lower tick array
-    pub fn deref_mut(&mut self) -> (&mut dyn TickArrayType, Option<&mut dyn TickArrayType>) {
-        if let Some(upper_tick_array_ref) = &mut self.upper_tick_array_ref {
-            (
-                self.lower_tick_array_ref.deref_mut(),
-                Some(upper_tick_array_ref.deref_mut()),
-            )
-        } else {
-            (self.lower_tick_array_ref.deref_mut(), None)
-        }
-    }
-
     /// Returns mutable references to the inner `LoadedTickArrayMut` values.
     /// This allows passing the `RefMut` directly to functions that need to modify the tick arrays.
     pub fn get_mut_refs(&mut self) -> (&mut LoadedTickArrayMut<'a>, Option<&mut LoadedTickArrayMut<'a>>) {
