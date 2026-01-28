@@ -96,6 +96,105 @@ pub trait TickArrayType {
             tick_spacing,
         ))
     }
+
+    /// Get next initialized tick in tick array for swap operations.
+    /// Returns the tick index if found, None otherwise.
+    /// This is a helper method for swap_internal compatibility.
+    fn get_next_initialized_tick_index_for_swap(
+        &self,
+        current_tick_index: i32,
+        tick_spacing: u16,
+        zero_for_one: bool,
+    ) -> Result<Option<i32>> {
+        let current_tick_array_start_index = get_array_start_index_for_swap(
+            current_tick_index,
+            tick_spacing,
+        );
+        if current_tick_array_start_index != self.start_tick_index() {
+            return Ok(None);
+        }
+
+        // Use the trait method to find next initialized tick
+        self.get_next_init_tick_index(current_tick_index, tick_spacing, zero_for_one)
+    }
+
+    /// Get the first initialized tick index in the tick array based on swap direction.
+    /// Returns the tick index if found.
+    fn get_first_initialized_tick_index(&self, tick_spacing: u16, zero_for_one: bool) -> Result<Option<i32>> {
+        let start = self.start_tick_index();
+        if zero_for_one {
+            // Search from right to left (highest to lowest)
+            for i in (0..TICK_ARRAY_SIZE).rev() {
+                let tick_index = start + i * tick_spacing as i32;
+                if let Ok(tick) = self.get_tick(tick_index, tick_spacing) {
+                    if tick.initialized {
+                        return Ok(Some(tick_index));
+                    }
+                }
+            }
+        } else {
+            // Search from left to right (lowest to highest)
+            for i in 0..TICK_ARRAY_SIZE {
+                let tick_index = start + i * tick_spacing as i32;
+                if let Ok(tick) = self.get_tick(tick_index, tick_spacing) {
+                    if tick.initialized {
+                        return Ok(Some(tick_index));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Cross a tick and update fee growths. Returns the liquidity net.
+    /// This method updates the tick in place and returns the liquidity net value.
+    fn cross_tick(
+        &mut self,
+        tick_index: i32,
+        tick_spacing: u16,
+        fee_growth_global_0_x64: u128,
+        fee_growth_global_1_x64: u128,
+        reward_infos: &[RewardInfo; REWARD_NUM],
+    ) -> Result<i128> {
+        let mut tick = self.get_tick(tick_index, tick_spacing)?;
+        let liquidity_net = tick.liquidity_net;
+
+        // Update fee growths (flip them)
+        tick.fee_growth_outside_0_x64 = fee_growth_global_0_x64
+            .checked_sub(tick.fee_growth_outside_0_x64)
+            .unwrap();
+        tick.fee_growth_outside_1_x64 = fee_growth_global_1_x64
+            .checked_sub(tick.fee_growth_outside_1_x64)
+            .unwrap();
+
+        // Update reward growths
+        for i in 0..REWARD_NUM {
+            if !reward_infos[i].initialized() {
+                continue;
+            }
+            tick.reward_growths_outside[i] = reward_infos[i]
+                .reward_growth_global_x64
+                .checked_sub(tick.reward_growths_outside[i])
+                .unwrap();
+        }
+
+        // Update the tick back to the array
+        let tick_update = TickUpdate::from(tick);
+        self.update_tick(tick_index, tick_spacing, &tick_update)?;
+
+        Ok(liquidity_net)
+    }
+}
+
+/// Helper to get array start index for a given tick index.
+/// This is used by swap operations to determine which tick array a tick belongs to.
+fn get_array_start_index_for_swap(tick_index: i32, tick_spacing: u16) -> i32 {
+    let ticks_in_array = TICK_ARRAY_SIZE * tick_spacing as i32;
+    let mut start = tick_index / ticks_in_array;
+    if tick_index < 0 && tick_index % ticks_in_array != 0 {
+        start = start - 1;
+    }
+    start * ticks_in_array
 }
 
 fn get_offset(tick_index: i32, start_tick_index: i32, tick_spacing: u16) -> isize {

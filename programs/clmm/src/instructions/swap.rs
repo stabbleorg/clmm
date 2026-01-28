@@ -56,7 +56,7 @@ struct StepComputations {
 pub fn swap_internal<'b, 'info>(
     amm_config: &AmmConfig,
     pool_state: &mut RefMut<PoolState>,
-    tick_array_states: &mut VecDeque<RefMut<TickArrayState>>,
+    tick_array_states: &mut VecDeque<LoadedTickArrayMut<'info>>,
     observation_state: &mut RefMut<ObservationState>,
     tickarray_bitmap_extension: &Option<TickArrayBitmapExtension>,
     amount_specified: u64,
@@ -110,7 +110,7 @@ pub fn swap_internal<'b, 'info>(
     let mut tick_array_current = tick_array_states.pop_front().unwrap();
     // find the first active tick array account
     for _ in 0..tick_array_states.len() {
-        if tick_array_current.start_tick_index == current_valid_tick_array_start_index {
+        if tick_array_current.start_tick_index() == current_valid_tick_array_start_index {
             break;
         }
         tick_array_current = tick_array_states
@@ -118,10 +118,10 @@ pub fn swap_internal<'b, 'info>(
             .ok_or(ErrorCode::NotEnoughTickArrayAccount)?;
     }
     // check the first tick_array account is owned by the pool
-    require_keys_eq!(tick_array_current.pool_id, pool_state.key());
+    require_keys_eq!(tick_array_current.pool(), pool_state.key());
     // check first tick array account is correct
     require_eq!(
-        tick_array_current.start_tick_index,
+        tick_array_current.start_tick_index(),
         current_valid_tick_array_start_index,
         ErrorCode::InvalidFirstTickArrayAccount
     );
@@ -148,26 +148,32 @@ pub fn swap_internal<'b, 'info>(
         let mut step = StepComputations::default();
         step.sqrt_price_start_x64 = state.sqrt_price_x64;
 
-        let mut next_initialized_tick = if let Some(tick_state) = tick_array_current
-            .next_initialized_tick(state.tick, pool_state.tick_spacing, zero_for_one)?
-        {
-            Box::new(*tick_state)
+        // Get next initialized tick using trait methods
+        let mut next_tick_index = tick_array_current
+            .get_next_initialized_tick_index_for_swap(state.tick, pool_state.tick_spacing, zero_for_one)?;
+        let mut next_tick: Tick = if let Some(tick_idx) = next_tick_index {
+            tick_array_current.get_tick(tick_idx, pool_state.tick_spacing)?
         } else {
             if !is_match_pool_current_tick_array {
                 is_match_pool_current_tick_array = true;
-                Box::new(*tick_array_current.first_initialized_tick(zero_for_one)?)
+                if let Some(first_tick_idx) = tick_array_current.get_first_initialized_tick_index(pool_state.tick_spacing, zero_for_one)? {
+                    next_tick_index = Some(first_tick_idx);
+                    tick_array_current.get_tick(first_tick_idx, pool_state.tick_spacing)?
+                } else {
+                    Tick::default()
+                }
             } else {
-                Box::new(TickState::default())
+                Tick::default()
             }
         };
         #[cfg(feature = "enable-log")]
         msg!(
-            "next_initialized_tick, status:{}, tick_index:{}, tick_array_current:{}",
-            next_initialized_tick.is_initialized(),
-            identity(next_initialized_tick.tick),
-            tick_array_current.key().to_string(),
+            "next_initialized_tick, status:{}, tick_index:{}, tick_array_start:{}",
+            next_tick.initialized,
+            next_tick_index.unwrap_or(0),
+            tick_array_current.start_tick_index(),
         );
-        if !next_initialized_tick.is_initialized() {
+        if !next_tick.initialized {
             let next_initialized_tickarray_index = pool_state
                 .next_initialized_tick_array_start_index(
                     &tickarray_bitmap_extension,
@@ -178,20 +184,26 @@ pub fn swap_internal<'b, 'info>(
                 return err!(ErrorCode::LiquidityInsufficient);
             }
 
-            while tick_array_current.start_tick_index != next_initialized_tickarray_index.unwrap() {
+            while tick_array_current.start_tick_index() != next_initialized_tickarray_index.unwrap() {
                 tick_array_current = tick_array_states
                     .pop_front()
                     .ok_or(ErrorCode::NotEnoughTickArrayAccount)?;
                 // check the tick_array account is owned by the pool
-                require_keys_eq!(tick_array_current.pool_id, pool_state.key());
+                require_keys_eq!(tick_array_current.pool(), pool_state.key());
             }
             current_valid_tick_array_start_index = next_initialized_tickarray_index.unwrap();
 
-            let first_initialized_tick = tick_array_current.first_initialized_tick(zero_for_one)?;
-            next_initialized_tick = Box::new(*first_initialized_tick);
+            if let Some(first_tick_idx) = tick_array_current.get_first_initialized_tick_index(pool_state.tick_spacing, zero_for_one)? {
+                next_tick_index = Some(first_tick_idx);
+                next_tick = tick_array_current.get_tick(first_tick_idx, pool_state.tick_spacing)?;
+            } else {
+                return err!(ErrorCode::LiquidityInsufficient);
+            }
         }
-        step.tick_next = next_initialized_tick.tick;
-        step.initialized = next_initialized_tick.is_initialized();
+        // Ensure we have a valid tick index
+        let tick_next = next_tick_index.ok_or(ErrorCode::LiquidityInsufficient)?;
+        step.tick_next = tick_next;
+        step.initialized = next_tick.initialized;
 
         if step.tick_next < tick_math::MIN_TICK {
             step.tick_next = tick_math::MIN_TICK;
@@ -322,7 +334,10 @@ pub fn swap_internal<'b, 'info>(
                 #[cfg(feature = "enable-log")]
                 msg!("loading next tick {}", step.tick_next);
 
-                let mut liquidity_net = next_initialized_tick.cross(
+                // Cross the tick using trait method
+                let mut liquidity_net = tick_array_current.cross_tick(
+                    step.tick_next,
+                    pool_state.tick_spacing,
                     if zero_for_one {
                         state.fee_growth_global_x64
                     } else {
@@ -334,12 +349,6 @@ pub fn swap_internal<'b, 'info>(
                         state.fee_growth_global_x64
                     },
                     &updated_reward_infos,
-                );
-                // update tick_state to tick_array account
-                tick_array_current.update_tick_state(
-                    next_initialized_tick.tick,
-                    pool_state.tick_spacing.into(),
-                    *next_initialized_tick,
                 )?;
 
                 if zero_for_one {
