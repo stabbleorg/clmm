@@ -43,12 +43,12 @@ pub struct DecreaseLiquidityV2<'info> {
     pub token_vault_1: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Stores init state for the lower tick
-    #[account(mut, constraint = tick_array_lower.load()?.pool_id == pool_state.key())]
-    pub tick_array_lower: AccountLoader<'info, TickArrayState>,
+    /// CHECK: can be both fixed or dynamic
+    pub tick_array_lower: UncheckedAccount<'info>,
 
     /// Stores init state for the upper tick
-    #[account(mut, constraint = tick_array_upper.load()?.pool_id == pool_state.key())]
-    pub tick_array_upper: AccountLoader<'info, TickArrayState>,
+    /// CHECK: can be both fixed or dynamic
+    pub tick_array_upper: UncheckedAccount<'info>,
 
     /// The destination token account for receive amount_0
     #[account(
@@ -70,7 +70,7 @@ pub struct DecreaseLiquidityV2<'info> {
     pub token_program_2022: Program<'info, Token2022>,
 
     /// memo program
-    /// CHECK:
+    /// CHECK: memo program id, we don't need to check the memo program
     #[account(
         address = spl_memo::id()
     )]
@@ -104,15 +104,23 @@ pub fn decrease_liquidity_v2<'a, 'b, 'c: 'info, 'info>(
     amount_0_min: u64,
     amount_1_min: u64,
 ) -> Result<()> {
+    // Store AccountInfo values to avoid temporary lifetime issues
+    let tick_array_lower_info = ctx.accounts.tick_array_lower.to_account_info();
+    let tick_array_upper_info = ctx.accounts.tick_array_upper.to_account_info();
+    let token_vault_0_info = ctx.accounts.token_vault_0.to_account_info();
+    let token_vault_1_info = ctx.accounts.token_vault_1.to_account_info();
+    let recipient_token_account_0_info = ctx.accounts.recipient_token_account_0.to_account_info();
+    let recipient_token_account_1_info = ctx.accounts.recipient_token_account_1.to_account_info();
+    
     decrease_liquidity(
         &ctx.accounts.pool_state,
         &mut ctx.accounts.personal_position,
-        &ctx.accounts.token_vault_0.to_account_info(),
-        &ctx.accounts.token_vault_1.to_account_info(),
-        &ctx.accounts.tick_array_lower,
-        &ctx.accounts.tick_array_upper,
-        &ctx.accounts.recipient_token_account_0.to_account_info(),
-        &ctx.accounts.recipient_token_account_1.to_account_info(),
+        &token_vault_0_info,
+        &token_vault_1_info,
+        &tick_array_lower_info,
+        &tick_array_upper_info,
+        &recipient_token_account_0_info,
+        &recipient_token_account_1_info,
         &ctx.accounts.token_program,
         Some(ctx.accounts.token_program_2022.clone()),
         Some(ctx.accounts.memo_program.clone()),

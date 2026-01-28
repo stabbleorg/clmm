@@ -99,10 +99,10 @@ export type DecreaseLiquidityV2Instruction<
         ? WritableAccount<TAccountTokenVault1>
         : TAccountTokenVault1,
       TAccountTickArrayLower extends string
-        ? WritableAccount<TAccountTickArrayLower>
+        ? ReadonlyAccount<TAccountTickArrayLower>
         : TAccountTickArrayLower,
       TAccountTickArrayUpper extends string
-        ? WritableAccount<TAccountTickArrayUpper>
+        ? ReadonlyAccount<TAccountTickArrayUpper>
         : TAccountTickArrayUpper,
       TAccountRecipientTokenAccount0 extends string
         ? WritableAccount<TAccountRecipientTokenAccount0>
@@ -304,8 +304,8 @@ export function getDecreaseLiquidityV2Instruction<
     },
     tokenVault0: { value: input.tokenVault0 ?? null, isWritable: true },
     tokenVault1: { value: input.tokenVault1 ?? null, isWritable: true },
-    tickArrayLower: { value: input.tickArrayLower ?? null, isWritable: true },
-    tickArrayUpper: { value: input.tickArrayUpper ?? null, isWritable: true },
+    tickArrayLower: { value: input.tickArrayLower ?? null, isWritable: false },
+    tickArrayUpper: { value: input.tickArrayUpper ?? null, isWritable: false },
     recipientTokenAccount0: {
       value: input.recipientTokenAccount0 ?? null,
       isWritable: true,

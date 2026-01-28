@@ -20,5 +20,4 @@ export * from './poolCreatedEvent';
 export * from './positionRewardInfo';
 export * from './rewardInfo';
 export * from './swapEvent';
-export * from './tickState';
 export * from './updateRewardInfosEvent';

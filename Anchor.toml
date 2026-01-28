@@ -19,5 +19,5 @@ amm_v3 = "6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6"
 url = "https://github.com/stabbleorg/clmm"
 
 [provider]
-cluster = "mainnet"
-wallet = ".keypair/id.json"
+cluster = "devnet"
+wallet = ".keypair/devnet.json"

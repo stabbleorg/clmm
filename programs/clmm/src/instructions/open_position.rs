@@ -24,6 +24,9 @@ use std::cell::RefMut;
 #[cfg(feature = "enable-log")]
 use std::convert::identity;
 use std::ops::Deref;
+use anchor_lang::solana_program::system_program;
+use crate::instructions::modify_position;
+use arrayref::array_ref;
 
 pub fn open_position<'a, 'b, 'c: 'info, 'info>(
     payer: &'b Signer<'info>,
@@ -79,10 +82,7 @@ pub fn open_position<'a, 'b, 'c: 'info, 'info>(
             pool_state.tick_spacing,
         )?;
 
-        // Why not use anchor's `init-if-needed` to create?
-        // Beacuse `tick_array_lower` and `tick_array_upper` can be the same account, anchor can initialze tick_array_lower but it causes a crash when anchor to initialze the `tick_array_upper`,
-        // the problem is variable scope, tick_array_lower_loader not exit to save the discriminator while build tick_array_upper_loader.
-        let tick_array_lower_loader = TickArrayState::get_or_create_tick_array(
+        let tick_array_lower_info = get_or_create_tick_array_by_discriminator(
             payer.to_account_info(),
             tick_array_lower_loader.to_account_info(),
             system_program.to_account_info(),
@@ -91,11 +91,11 @@ pub fn open_position<'a, 'b, 'c: 'info, 'info>(
             pool_state.tick_spacing,
         )?;
 
-        let tick_array_upper_loader =
+        let tick_array_upper_info = 
             if tick_array_lower_start_index == tick_array_upper_start_index {
-                AccountLoad::<TickArrayState>::try_from(&tick_array_upper_loader.to_account_info())?
+                tick_array_lower_info.clone()
             } else {
-                TickArrayState::get_or_create_tick_array(
+                get_or_create_tick_array_by_discriminator(
                     payer.to_account_info(),
                     tick_array_upper_loader.to_account_info(),
                     system_program.to_account_info(),
@@ -125,8 +125,8 @@ pub fn open_position<'a, 'b, 'c: 'info, 'info>(
             token_account_1,
             token_vault_0,
             token_vault_1,
-            &tick_array_lower_loader,
-            &tick_array_upper_loader,
+            &tick_array_lower_info,
+            &tick_array_upper_info,
             token_program_2022,
             token_program,
             vault_0_mint,
@@ -215,8 +215,8 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     token_account_1: &'b AccountInfo<'info>,
     token_vault_0: &'b AccountInfo<'info>,
     token_vault_1: &'b AccountInfo<'info>,
-    tick_array_lower_loader: &'b AccountLoad<'info, TickArrayState>,
-    tick_array_upper_loader: &'b AccountLoad<'info, TickArrayState>,
+    tick_array_lower_info: &AccountInfo<'info>,
+    tick_array_upper_info: &AccountInfo<'info>,
     token_program_2022: Option<&Program<'info, Token2022>>,
     token_program: &'b Program<'info, Token>,
     vault_0_mint: Option<Box<InterfaceAccount<'info, token_interface::Mint>>>,
@@ -275,65 +275,97 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     }
     assert!(*liquidity > 0);
     let liquidity_before = pool_state.liquidity;
-    require_keys_eq!(tick_array_lower_loader.load()?.pool_id, pool_state.key());
-    require_keys_eq!(tick_array_upper_loader.load()?.pool_id, pool_state.key());
-
-    // get tick_state
-    let mut tick_lower_state = *tick_array_lower_loader
-        .load_mut()?
-        .get_tick_state_mut(tick_lower_index, pool_state.tick_spacing)?;
-    let mut tick_upper_state = *tick_array_upper_loader
-        .load_mut()?
-        .get_tick_state_mut(tick_upper_index, pool_state.tick_spacing)?;
-    // If the tickState is not initialized, assign a value to tickState.tick here
-    if tick_lower_state.tick == 0 {
-        tick_lower_state.tick = tick_lower_index;
+    let mut tick_arrays = TickArraysMut::load(
+        tick_array_lower_info,
+        tick_array_upper_info,
+        &pool_state.key().clone()
+    )?;
+    let (tick_lower_array, tick_upper_array) = tick_arrays.get_mut_refs();
+    require_keys_eq!(tick_lower_array.pool(), pool_state.key());
+    if let Some(upper_array) = tick_upper_array.as_ref() {
+        require_keys_eq!(upper_array.pool(), pool_state.key());
+        // check if upper tick == 0
     }
-    if tick_upper_state.tick == 0 {
-        tick_upper_state.tick = tick_upper_index;
-    }
+    
+    // Determine if upper and lower arrays are the same before moving tick_upper_array
+    let is_same_array = tick_array_lower_info.key() == tick_array_upper_info.key();
+    
+    // Capture upper array information before moving tick_upper_array
+    let (upper_before_init_tick_count, upper_is_variable_size, upper_start_tick_index) = if is_same_array {
+        (
+            tick_lower_array.initialized_tick_count(),
+            tick_lower_array.is_variable_size(),
+            tick_lower_array.start_tick_index(),
+        )
+    } else {
+        let upper_array_ref = tick_upper_array.as_ref().unwrap();
+        (
+            upper_array_ref.initialized_tick_count(),
+            upper_array_ref.is_variable_size(),
+            upper_array_ref.start_tick_index(),
+        )
+    };
+    
+    // modify_position handles tick updates via TickArrayType trait, which works with both fixed and dynamic arrays
     let clock = Clock::get()?;
-    let mut result = modify_position(
+    let mut result = modify_position::modify_position(
         i128::try_from(*liquidity).unwrap(),
         pool_state,
-        &mut tick_lower_state,
-        &mut tick_upper_state,
+        tick_lower_array,
+        tick_upper_array,
+        tick_lower_index,
+        tick_upper_index,
         clock.unix_timestamp as u64,
     )?;
 
-    // update tick_state
-    tick_array_lower_loader.load_mut()?.update_tick_state(
-        tick_lower_index,
-        pool_state.tick_spacing,
-        tick_lower_state,
-    )?;
-    tick_array_upper_loader.load_mut()?.update_tick_state(
-        tick_upper_index,
-        pool_state.tick_spacing,
-        tick_upper_state,
-    )?;
-
+    // Handle tick array bitmap updates when ticks are flipped
     if result.tick_lower_flipped {
-        let mut tick_array_lower = tick_array_lower_loader.load_mut()?;
-        let before_init_tick_count = tick_array_lower.initialized_tick_count;
-        tick_array_lower.update_initialized_tick_count(true)?;
+        let before_init_tick_count = tick_lower_array.initialized_tick_count();
+        
+        // For fixed arrays, update initialized_tick_count
+        // Check if it's a fixed array by checking is_variable_size
+        if !tick_lower_array.is_variable_size() {
+            // It's a fixed array, load it as FixedTickArray and update the count
+            let fixed_loader = AccountLoad::<FixedTickArray>::try_from_unchecked(
+                &crate::id(),
+                tick_array_lower_info,
+            )?;
+            fixed_loader.load_mut()?.update_initialized_tick_count(true)?;
+        }
+        // For dynamic arrays, initialized_tick_count is computed from bitmap, so no update needed
 
         if before_init_tick_count == 0 {
             pool_state.flip_tick_array_bit(
                 tick_array_bitmap_extension,
-                tick_array_lower.start_tick_index,
+                tick_lower_array.start_tick_index(),
             )?;
         }
     }
     if result.tick_upper_flipped {
-        let mut tick_array_upper = tick_array_upper_loader.load_mut()?;
-        let before_init_tick_count = tick_array_upper.initialized_tick_count;
-        tick_array_upper.update_initialized_tick_count(true)?;
+        // Use the captured information instead of trying to access tick_upper_array after it was moved
+        let before_init_tick_count = upper_before_init_tick_count;
+        
+        // For fixed arrays, update initialized_tick_count
+        // Check if it's a fixed array by checking is_variable_size
+        if !upper_is_variable_size {
+            // It's a fixed array, load it as FixedTickArray and update the count
+            let tick_array_info = if is_same_array {
+                tick_array_lower_info
+            } else {
+                tick_array_upper_info
+            };
+            let fixed_loader = AccountLoad::<FixedTickArray>::try_from_unchecked(
+                &crate::id(),
+                tick_array_info,
+            )?;
+            fixed_loader.load_mut()?.update_initialized_tick_count(true)?;
+        }
+        // For dynamic arrays, initialized_tick_count is computed from bitmap, so no update needed
 
         if before_init_tick_count == 0 {
             pool_state.flip_tick_array_bit(
                 tick_array_bitmap_extension,
-                tick_array_upper.start_tick_index,
+                upper_start_tick_index,
             )?;
         }
     }
@@ -417,103 +449,6 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
         liquidity_after: pool_state.liquidity,
     });
     Ok(result)
-}
-
-pub fn modify_position(
-    liquidity_delta: i128,
-    pool_state: &mut RefMut<PoolState>,
-    tick_lower_state: &mut TickState,
-    tick_upper_state: &mut TickState,
-    timestamp: u64,
-) -> Result<LiquidityChangeResult> {
-    let updated_reward_infos = pool_state.update_reward_infos(timestamp)?;
-
-    let mut flipped_lower = false;
-    let mut flipped_upper = false;
-
-    // update the ticks if liquidity delta is non-zero
-    if liquidity_delta != 0 {
-        // Update tick state and find if tick is flipped
-        flipped_lower = tick_lower_state.update(
-            pool_state.tick_current,
-            liquidity_delta,
-            pool_state.fee_growth_global_0_x64,
-            pool_state.fee_growth_global_1_x64,
-            false,
-            &updated_reward_infos,
-        )?;
-        flipped_upper = tick_upper_state.update(
-            pool_state.tick_current,
-            liquidity_delta,
-            pool_state.fee_growth_global_0_x64,
-            pool_state.fee_growth_global_1_x64,
-            true,
-            &updated_reward_infos,
-        )?;
-        #[cfg(feature = "enable-log")]
-        msg!(
-            "tick_upper.reward_growths_outside_x64:{:?}, tick_lower.reward_growths_outside_x64:{:?}",
-            identity(tick_upper_state.reward_growths_outside_x64),
-            identity(tick_lower_state.reward_growths_outside_x64)
-        );
-    }
-
-    // Update fees
-    let (fee_growth_inside_0_x64, fee_growth_inside_1_x64) = tick_array::get_fee_growth_inside(
-        tick_lower_state.deref(),
-        tick_upper_state.deref(),
-        pool_state.tick_current,
-        pool_state.fee_growth_global_0_x64,
-        pool_state.fee_growth_global_1_x64,
-    );
-
-    // Update reward outside if needed
-    let reward_growths_inside = tick_array::get_reward_growths_inside(
-        tick_lower_state.deref(),
-        tick_upper_state.deref(),
-        pool_state.tick_current,
-        &updated_reward_infos,
-    );
-
-    if liquidity_delta < 0 {
-        if flipped_lower {
-            tick_lower_state.clear();
-        }
-        if flipped_upper {
-            tick_upper_state.clear();
-        }
-    }
-
-    let mut amount_0 = 0;
-    let mut amount_1 = 0;
-
-    if liquidity_delta != 0 {
-        (amount_0, amount_1) = liquidity_math::get_delta_amounts_signed(
-            pool_state.tick_current,
-            pool_state.sqrt_price_x64,
-            tick_lower_state.tick,
-            tick_upper_state.tick,
-            liquidity_delta,
-        )?;
-        if pool_state.tick_current >= tick_lower_state.tick
-            && pool_state.tick_current < tick_upper_state.tick
-        {
-            pool_state.liquidity =
-                liquidity_math::add_delta(pool_state.liquidity, liquidity_delta)?;
-        }
-    }
-
-    Ok(LiquidityChangeResult {
-        amount_0: amount_0,
-        amount_1: amount_1,
-        amount_0_transfer_fee: 0,
-        amount_1_transfer_fee: 0,
-        tick_lower_flipped: flipped_lower,
-        tick_upper_flipped: flipped_upper,
-        fee_growth_inside_0_x64: fee_growth_inside_0_x64,
-        fee_growth_inside_1_x64: fee_growth_inside_1_x64,
-        reward_growths_inside: reward_growths_inside,
-    })
 }
 
 fn mint_nft_and_remove_mint_authority<'info>(
@@ -727,179 +662,4 @@ pub fn initialize_token_metadata_extension<'info>(
     )?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod modify_position_test {
-    use super::modify_position;
-    use crate::instructions::LiquidityChangeResult;
-    use crate::libraries::tick_math;
-    use crate::states::oracle::block_timestamp_mock;
-    use crate::states::pool_test::build_pool;
-    use crate::states::tick_array_test::build_tick;
-
-    #[test]
-    fn init_position_in_range_test() {
-        let liquidity = 10000;
-        let tick_current = 1;
-        let pool_state_ref = build_pool(
-            tick_current,
-            10,
-            tick_math::get_sqrt_price_at_tick(tick_current).unwrap(),
-            liquidity,
-        );
-        let pool_state = &mut pool_state_ref.borrow_mut();
-
-        let tick_lower_index = 0;
-        let tick_upper_index = 2;
-        let tick_lower_state = &mut build_tick(tick_lower_index, 0, 0).take();
-        let tick_upper_state = &mut build_tick(tick_upper_index, 0, 0).take();
-
-        let liquidity_delta = 10000;
-        let LiquidityChangeResult {
-            amount_0: amount_0_int,
-            amount_1: amount_1_int,
-            tick_lower_flipped: flip_tick_lower,
-            tick_upper_flipped: flip_tick_upper,
-            ..
-        } = modify_position(
-            liquidity_delta,
-            pool_state,
-            tick_lower_state,
-            tick_upper_state,
-            block_timestamp_mock(),
-        )
-        .unwrap();
-        assert!(amount_0_int != 0);
-        assert!(amount_1_int != 0);
-        assert_eq!(flip_tick_lower, true);
-        assert_eq!(flip_tick_upper, true);
-
-        // check pool active liquidity
-        let new_liquidity = pool_state.liquidity;
-        assert_eq!(new_liquidity, liquidity + (liquidity_delta as u128));
-
-        // check tick state
-        assert!(tick_lower_state.is_initialized());
-        assert!(tick_lower_state.liquidity_gross == 10000);
-        assert!(tick_upper_state.liquidity_gross == 10000);
-
-        assert!(tick_lower_state.liquidity_net == 10000);
-        assert!(tick_upper_state.liquidity_net == -10000);
-
-        assert!(tick_lower_state.fee_growth_outside_0_x64 == pool_state.fee_growth_global_0_x64);
-        assert!(tick_lower_state.fee_growth_outside_1_x64 == pool_state.fee_growth_global_1_x64);
-        assert!(tick_upper_state.fee_growth_outside_0_x64 == 0);
-        assert!(tick_upper_state.fee_growth_outside_1_x64 == 0);
-    }
-
-    #[test]
-    fn init_position_in_left_of_current_tick_test() {
-        let liquidity = 10000;
-        let tick_current = 1;
-        let pool_state_ref = build_pool(
-            tick_current,
-            10,
-            tick_math::get_sqrt_price_at_tick(tick_current).unwrap(),
-            liquidity,
-        );
-        let pool_state = &mut pool_state_ref.borrow_mut();
-
-        let tick_lower_index = -1;
-        let tick_upper_index = 0;
-        let tick_lower_state = &mut build_tick(tick_lower_index, 0, 0).take();
-        let tick_upper_state = &mut build_tick(tick_upper_index, 0, 0).take();
-
-        let liquidity_delta = 10000;
-        let LiquidityChangeResult {
-            amount_0: amount_0_int,
-            amount_1: amount_1_int,
-            tick_lower_flipped: flip_tick_lower,
-            tick_upper_flipped: flip_tick_upper,
-            ..
-        } = modify_position(
-            liquidity_delta,
-            pool_state,
-            tick_lower_state,
-            tick_upper_state,
-            block_timestamp_mock(),
-        )
-        .unwrap();
-        assert!(amount_0_int == 0);
-        assert!(amount_1_int != 0);
-        assert_eq!(flip_tick_lower, true);
-        assert_eq!(flip_tick_upper, true);
-
-        // check pool active liquidity
-        let new_liquidity = pool_state.liquidity;
-        assert_eq!(new_liquidity, liquidity_delta as u128);
-
-        // check tick state
-        assert!(tick_lower_state.is_initialized());
-        assert!(tick_lower_state.liquidity_gross == 10000);
-        assert!(tick_upper_state.liquidity_gross == 10000);
-
-        assert!(tick_lower_state.liquidity_net == 10000);
-        assert!(tick_upper_state.liquidity_net == -10000);
-
-        assert!(tick_lower_state.fee_growth_outside_0_x64 == pool_state.fee_growth_global_0_x64);
-        assert!(tick_lower_state.fee_growth_outside_1_x64 == pool_state.fee_growth_global_1_x64);
-        assert!(tick_upper_state.fee_growth_outside_0_x64 == pool_state.fee_growth_global_0_x64);
-        assert!(tick_upper_state.fee_growth_outside_1_x64 == pool_state.fee_growth_global_1_x64);
-    }
-
-    #[test]
-    fn init_position_in_right_of_current_tick_test() {
-        let liquidity = 10000;
-        let tick_current = 1;
-        let pool_state_ref = build_pool(
-            tick_current,
-            10,
-            tick_math::get_sqrt_price_at_tick(tick_current).unwrap(),
-            liquidity,
-        );
-        let pool_state = &mut pool_state_ref.borrow_mut();
-
-        let tick_lower_index = 2;
-        let tick_upper_index = 3;
-        let tick_lower_state = &mut build_tick(tick_lower_index, 0, 0).take();
-        let tick_upper_state = &mut build_tick(tick_upper_index, 0, 0).take();
-
-        let liquidity_delta = 10000;
-        let LiquidityChangeResult {
-            amount_0: amount_0_int,
-            amount_1: amount_1_int,
-            tick_lower_flipped: flip_tick_lower,
-            tick_upper_flipped: flip_tick_upper,
-            ..
-        } = modify_position(
-            liquidity_delta,
-            pool_state,
-            tick_lower_state,
-            tick_upper_state,
-            block_timestamp_mock(),
-        )
-        .unwrap();
-        assert!(amount_0_int != 0);
-        assert!(amount_1_int == 0);
-        assert_eq!(flip_tick_lower, true);
-        assert_eq!(flip_tick_upper, true);
-
-        // check pool active liquidity
-        let new_liquidity = pool_state.liquidity;
-        assert_eq!(new_liquidity, liquidity_delta as u128);
-
-        // check tick state
-        assert!(tick_lower_state.is_initialized());
-        assert!(tick_lower_state.liquidity_gross == 10000);
-        assert!(tick_upper_state.liquidity_gross == 10000);
-
-        assert!(tick_lower_state.liquidity_net == 10000);
-        assert!(tick_upper_state.liquidity_net == -10000);
-
-        assert!(tick_lower_state.fee_growth_outside_0_x64 == 0);
-        assert!(tick_lower_state.fee_growth_outside_1_x64 == 0);
-        assert!(tick_upper_state.fee_growth_outside_0_x64 == 0);
-        assert!(tick_upper_state.fee_growth_outside_1_x64 == 0);
-    }
 }

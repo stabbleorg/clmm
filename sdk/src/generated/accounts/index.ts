@@ -14,4 +14,3 @@ export * from './poolState';
 export * from './protocolPositionState';
 export * from './supportMintAssociated';
 export * from './tickArrayBitmapExtension';
-export * from './tickArrayState';

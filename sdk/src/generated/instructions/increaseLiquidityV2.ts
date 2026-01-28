@@ -96,10 +96,10 @@ export type IncreaseLiquidityV2Instruction<
         ? WritableAccount<TAccountPersonalPosition>
         : TAccountPersonalPosition,
       TAccountTickArrayLower extends string
-        ? WritableAccount<TAccountTickArrayLower>
+        ? ReadonlyAccount<TAccountTickArrayLower>
         : TAccountTickArrayLower,
       TAccountTickArrayUpper extends string
-        ? WritableAccount<TAccountTickArrayUpper>
+        ? ReadonlyAccount<TAccountTickArrayUpper>
         : TAccountTickArrayUpper,
       TAccountTokenAccount0 extends string
         ? WritableAccount<TAccountTokenAccount0>
@@ -301,8 +301,8 @@ export function getIncreaseLiquidityV2Instruction<
       value: input.personalPosition ?? null,
       isWritable: true,
     },
-    tickArrayLower: { value: input.tickArrayLower ?? null, isWritable: true },
-    tickArrayUpper: { value: input.tickArrayUpper ?? null, isWritable: true },
+    tickArrayLower: { value: input.tickArrayLower ?? null, isWritable: false },
+    tickArrayUpper: { value: input.tickArrayUpper ?? null, isWritable: false },
     tokenAccount0: { value: input.tokenAccount0 ?? null, isWritable: true },
     tokenAccount1: { value: input.tokenAccount1 ?? null, isWritable: true },
     tokenVault0: { value: input.tokenVault0 ?? null, isWritable: true },

@@ -49,7 +49,6 @@ export enum AmmV3Account {
   ProtocolPositionState,
   SupportMintAssociated,
   TickArrayBitmapExtension,
-  TickArrayState,
 }
 
 export function identifyAmmV3Account(
@@ -143,17 +142,6 @@ export function identifyAmmV3Account(
     )
   ) {
     return AmmV3Account.TickArrayBitmapExtension;
-  }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([192, 155, 85, 205, 49, 249, 129, 42])
-      ),
-      0
-    )
-  ) {
-    return AmmV3Account.TickArrayState;
   }
   throw new Error(
     'The provided account could not be identified as a ammV3 account.'

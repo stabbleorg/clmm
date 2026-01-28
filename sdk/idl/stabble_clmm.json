@@ -980,15 +980,13 @@
           "name": "tick_array_lower",
           "docs": [
             "Stores init state for the lower tick"
-          ],
-          "writable": true
+          ]
         },
         {
           "name": "tick_array_upper",
           "docs": [
             "Stores init state for the upper tick"
-          ],
-          "writable": true
+          ]
         },
         {
           "name": "recipient_token_account_0",
@@ -1109,15 +1107,13 @@
           "name": "tick_array_lower",
           "docs": [
             "Stores init state for the lower tick"
-          ],
-          "writable": true
+          ]
         },
         {
           "name": "tick_array_upper",
           "docs": [
             "Stores init state for the upper tick"
-          ],
-          "writable": true
+          ]
         },
         {
           "name": "token_account_0",
@@ -2263,19 +2259,6 @@
         139,
         153
       ]
-    },
-    {
-      "name": "TickArrayState",
-      "discriminator": [
-        192,
-        155,
-        85,
-        205,
-        49,
-        249,
-        129,
-        42
-      ]
     }
   ],
   "events": [
@@ -2661,6 +2644,46 @@
       "code": 6044,
       "name": "TransferFeeCalculateNotMatch",
       "msg": "TransferFee calculate not match"
+    },
+    {
+      "code": 6045,
+      "name": "InvalidTickSpacing",
+      "msg": "Tick-spacing is not supported"
+    },
+    {
+      "code": 6046,
+      "name": "InvalidTickArraySequence",
+      "msg": "Invalid tick array sequence provided for instruction."
+    },
+    {
+      "code": 6047,
+      "name": "TickNotFound",
+      "msg": "Tick not found within tick array"
+    },
+    {
+      "code": 6048,
+      "name": "DifferentPoolTickArrayAccount",
+      "msg": "TickArray account for different pool provided"
+    },
+    {
+      "code": 6049,
+      "name": "InvalidStartTick",
+      "msg": "Invalid start tick index provided."
+    },
+    {
+      "code": 6050,
+      "name": "AccountDiscriminatorNotFound",
+      "msg": "Invalid account discriminator"
+    },
+    {
+      "code": 6051,
+      "name": "AccountDiscriminatorMismatch",
+      "msg": "Account does not have the expected discriminator"
+    },
+    {
+      "code": 6052,
+      "name": "AccountOwnedByWrongProgram",
+      "msg": "Account isn't owned by our program"
     }
   ],
   "types": [
@@ -4247,118 +4270,6 @@
                   ]
                 },
                 14
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "TickArrayState",
-      "serialization": "bytemuckunsafe",
-      "repr": {
-        "kind": "c",
-        "packed": true
-      },
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "pool_id",
-            "type": "pubkey"
-          },
-          {
-            "name": "start_tick_index",
-            "type": "i32"
-          },
-          {
-            "name": "ticks",
-            "type": {
-              "array": [
-                {
-                  "defined": {
-                    "name": "TickState"
-                  }
-                },
-                60
-              ]
-            }
-          },
-          {
-            "name": "initialized_tick_count",
-            "type": "u8"
-          },
-          {
-            "name": "recent_epoch",
-            "type": "u64"
-          },
-          {
-            "name": "padding",
-            "type": {
-              "array": [
-                "u8",
-                107
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "TickState",
-      "serialization": "bytemuckunsafe",
-      "repr": {
-        "kind": "c",
-        "packed": true
-      },
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "tick",
-            "type": "i32"
-          },
-          {
-            "name": "liquidity_net",
-            "docs": [
-              "Amount of net liquidity added (subtracted) when tick is crossed from left to right (right to left)"
-            ],
-            "type": "i128"
-          },
-          {
-            "name": "liquidity_gross",
-            "docs": [
-              "The total position liquidity that references this tick"
-            ],
-            "type": "u128"
-          },
-          {
-            "name": "fee_growth_outside_0_x64",
-            "docs": [
-              "Fee growth per unit of liquidity on the _other_ side of this tick (relative to the current tick)",
-              "only has relative meaning, not absolute — the value depends on when the tick is initialized"
-            ],
-            "type": "u128"
-          },
-          {
-            "name": "fee_growth_outside_1_x64",
-            "type": "u128"
-          },
-          {
-            "name": "reward_growths_outside_x64",
-            "type": {
-              "array": [
-                "u128",
-                3
-              ]
-            }
-          },
-          {
-            "name": "padding",
-            "type": {
-              "array": [
-                "u32",
-                13
               ]
             }
           }
