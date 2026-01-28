@@ -52,7 +52,7 @@ pub fn decrease_liquidity<'b, 'c: 'info, 'info>(
         liquidity_before = pool_state.liquidity;
         pool_sqrt_price_x64 = pool_state.sqrt_price_x64;
         pool_tick_current = pool_state.tick_current;
-        let mut tick_arrays = TickArraysMut::load(
+        let tick_arrays = TickArraysMut::load(
             tick_array_lower_info,
             tick_array_upper_info,
             &pool_state_loader.key(),

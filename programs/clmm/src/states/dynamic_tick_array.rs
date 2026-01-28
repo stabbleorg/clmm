@@ -118,12 +118,13 @@ impl DynamicTick {
 
 // This struct is never actually used anywhere.
 // account attr is used to generate the definition in the IDL.
+#[account]
 pub struct DynamicTickArray {
     pub start_tick_index: i32, // 4 bytes
     pub pool_id: Pubkey,     // 32 bytes
     // 0: uninitialized, 1: initialized
     pub tick_bitmap: u128, // 16 bytes
-    pub ticks: [DynamicTick; TICK_ARRAY_SIZE_USIZE],
+    pub ticks: Vec<DynamicTick>, // Variable-length array (up to TICK_ARRAY_SIZE_USIZE)
 }
 
 impl DynamicTick {
@@ -144,16 +145,10 @@ impl DynamicTickArray {
         + DynamicTick::INITIALIZED_LEN * TICK_ARRAY_SIZE_USIZE;
 }
 
-// Create a private module to generate the discriminator based on the struct name.
-mod __private {
-    use super::*;
-    #[account]
-    pub struct DynamicTickArray {}
-}
-
-impl Discriminator for DynamicTickArray {
-    const DISCRIMINATOR: &'static [u8] = __private::DynamicTickArray::DISCRIMINATOR;
-}
+// Anchor automatically implements Discriminator and AccountDeserialize for structs with #[account]
+// so DynamicTickArray::DISCRIMINATOR is available for use in MIN_LEN and MAX_LEN
+// Note: AccountDeserialize will cause stack overflow if actually called, but it's never used
+// since we use DynamicTickArrayLoader instead
 
 impl From<&TickUpdate> for DynamicTick {
     fn from(update: &TickUpdate) -> Self {
