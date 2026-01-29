@@ -24,6 +24,7 @@ import {
   type ParsedCreatePoolInstruction,
   type ParsedCreateSupportMintAssociatedInstruction,
   type ParsedDecreaseLiquidityV2Instruction,
+  type ParsedIdlIncludeInstruction,
   type ParsedIncreaseLiquidityV2Instruction,
   type ParsedInitializeRewardInstruction,
   type ParsedOpenPositionWithToken22NftInstruction,
@@ -42,6 +43,7 @@ export const AMM_V3_PROGRAM_ADDRESS =
 
 export enum AmmV3Account {
   AmmConfig,
+  DynamicTickArray,
   ObservationState,
   OperationState,
   PersonalPositionState,
@@ -65,6 +67,17 @@ export function identifyAmmV3Account(
     )
   ) {
     return AmmV3Account.AmmConfig;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([17, 216, 246, 142, 225, 199, 218, 56])
+      ),
+      0
+    )
+  ) {
+    return AmmV3Account.DynamicTickArray;
   }
   if (
     containsBytes(
@@ -159,6 +172,7 @@ export enum AmmV3Instruction {
   CreatePool,
   CreateSupportMintAssociated,
   DecreaseLiquidityV2,
+  IdlInclude,
   IncreaseLiquidityV2,
   InitializeReward,
   OpenPositionWithToken22Nft,
@@ -285,6 +299,17 @@ export function identifyAmmV3Instruction(
     )
   ) {
     return AmmV3Instruction.DecreaseLiquidityV2;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([223, 253, 121, 121, 60, 193, 129, 31])
+      ),
+      0
+    )
+  ) {
+    return AmmV3Instruction.IdlInclude;
   }
   if (
     containsBytes(
@@ -445,6 +470,9 @@ export type ParsedAmmV3Instruction<
   | ({
       instructionType: AmmV3Instruction.DecreaseLiquidityV2;
     } & ParsedDecreaseLiquidityV2Instruction<TProgram>)
+  | ({
+      instructionType: AmmV3Instruction.IdlInclude;
+    } & ParsedIdlIncludeInstruction<TProgram>)
   | ({
       instructionType: AmmV3Instruction.IncreaseLiquidityV2;
     } & ParsedIncreaseLiquidityV2Instruction<TProgram>)

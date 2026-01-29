@@ -7,6 +7,7 @@
  */
 
 export * from './ammConfig';
+export * from './dynamicTickArray';
 export * from './observationState';
 export * from './operationState';
 export * from './personalPositionState';

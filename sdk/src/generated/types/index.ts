@@ -12,6 +12,8 @@ export * from './collectProtocolFeeEvent';
 export * from './configChangeEvent';
 export * from './createPersonalPositionEvent';
 export * from './decreaseLiquidityEvent';
+export * from './dynamicTick';
+export * from './dynamicTickData';
 export * from './increaseLiquidityEvent';
 export * from './liquidityCalculateEvent';
 export * from './liquidityChangeEvent';
