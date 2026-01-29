@@ -3,7 +3,7 @@ use crate::states::DynamicTickArray;
 
 // This struct is only here so that DynamicTickArray is included in the IDL.
 // Anchor only adds accounts to the IDL if they are used in at least one instruction.
-// Using Account with Vec<DynamicTick> to avoid stack overflow (Vec works with Anchor serialization)
+// DynamicTickArray uses a fixed-size array [DynamicTick; TICK_ARRAY_SIZE_USIZE] for IDL generation.
 #[derive(Accounts)]
 pub struct IdlInclude<'info> {
     /// DynamicTickArray account - only used for IDL generation

@@ -116,15 +116,22 @@ impl DynamicTick {
     }
 }
 
-// This struct is never actually used anywhere.
+// This struct is never actually used anywhere at runtime.
 // account attr is used to generate the definition in the IDL.
+// 
+// NOTE: Using fixed-size array for IDL generation (Anchor requires fixed-size types).
+// The actual runtime account data is variable-length based on initialized ticks.
+// Runtime code uses DynamicTickArrayLoader which handles variable sizing.
 #[account]
 pub struct DynamicTickArray {
     pub start_tick_index: i32, // 4 bytes
     pub pool_id: Pubkey,     // 32 bytes
     // 0: uninitialized, 1: initialized
     pub tick_bitmap: u128, // 16 bytes
-    pub ticks: Vec<DynamicTick>, // Variable-length array (up to TICK_ARRAY_SIZE_USIZE)
+    // Fixed-size array for IDL generation - Anchor requires fixed-size types in IDL
+    // The actual runtime account data is variable-length based on initialized ticks
+    // Runtime uses DynamicTickArrayLoader instead of deserializing this struct
+    pub ticks: [DynamicTick; TICK_ARRAY_SIZE_USIZE],
 }
 
 impl DynamicTick {

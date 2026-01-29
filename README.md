@@ -1,2 +1,6 @@
 ## Building:
-Run `yarn build` and not `anchor build` (as it doesn't include DynamicTickArray's in the IDL).
+### Program:
+- Run `yarn build-program`
+
+### SDK:
+- Run `yarn build-sdk`

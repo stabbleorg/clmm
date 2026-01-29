@@ -13,7 +13,12 @@ doctest = false
 [features]
 no-entrypoint = []
 cpi = ["no-entrypoint"]
-default = []
+# Enable idl-build by default for IDL generation
+# DynamicTickArray struct uses conditional compilation:
+# - With idl-build: fixed-size array [DynamicTick; TICK_ARRAY_SIZE_USIZE] for IDL
+# - Without idl-build: Vec<DynamicTick> for runtime (though never actually deserialized)
+# Runtime code uses DynamicTickArrayLoader which handles variable sizing
+default = ["idl-build"]
 client = []
 no-log-ix-name = []
 enable-log = []

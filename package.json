@@ -6,8 +6,9 @@
   "scripts": {
     "cli": "npx ts-node --files cli",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "anchor build && node scripts/add-dynamic-tick-array-to-idl.js",
-    "update-idl": "node scripts/add-dynamic-tick-array-to-idl.js"
+    "build-program": "anchor build",
+    "update-idl": "node scripts/add-dynamic-tick-array-to-idl.js",
+    "build-sdk": "anchor build && cp target/idl/amm_v3.json sdk/idl/stabble_clmm.json && cd sdk && yarn generate-clients"
   },
   "repository": {
     "type": "git",

@@ -48,3 +48,6 @@ pub use admin::*;
 
 mod modify_position;
 pub use modify_position::*;
+
+pub mod idl_include;
+pub use idl_include::*;

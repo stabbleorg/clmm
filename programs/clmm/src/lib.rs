@@ -402,4 +402,18 @@ pub mod amm_v3 {
     ) -> Result<()> {
         instructions::close_protocol_position(ctx)
     }
+
+    /// Dummy instruction to include DynamicTickArray in the IDL.
+    /// Anchor only includes account types in the IDL if they are used in at least one instruction.
+    /// This instruction is never actually called, it only exists for IDL generation.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The context of accounts
+    ///
+    pub fn idl_include<'a, 'b, 'c, 'info>(
+        ctx: Context<'a, 'b, 'c, 'info, IdlInclude<'info>>,
+    ) -> Result<()> {
+        instructions::idl_include(ctx)
+    }
 }
