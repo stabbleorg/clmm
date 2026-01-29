@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "cli": "npx ts-node --files cli",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "anchor build && node scripts/add-dynamic-tick-array-to-idl.js",
+    "update-idl": "node scripts/add-dynamic-tick-array-to-idl.js"
   },
   "repository": {
     "type": "git",
