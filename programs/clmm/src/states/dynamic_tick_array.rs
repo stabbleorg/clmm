@@ -514,3 +514,17 @@ impl DynamicTickArrayLoader {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uninitialized_tick_serialization_size() {
+        let tick = DynamicTick::Uninitialized;
+
+        let mut bytes = Vec::new();
+        tick.serialize(&mut bytes).unwrap();
+
+        assert_eq!(bytes.len(), DynamicTick::UNINITIALIZED_LEN);
+    }
+}
