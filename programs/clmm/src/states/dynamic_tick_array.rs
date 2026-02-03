@@ -527,4 +527,20 @@ mod tests {
 
         assert_eq!(bytes.len(), DynamicTick::UNINITIALIZED_LEN);
     }
+
+
+    #[test]
+    fn test_initialized_tick_serialization_size() {
+        let tick = DynamicTick::Initialized(DynamicTickData {
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [9; REWARD_NUM],
+        });
+
+        let mut bytes: Vec<u8> = Vec::new();
+        tick.serialize(&mut bytes).unwrap();
+        assert_eq!(bytes.len(), DynamicTick::INITIALIZED_LEN);
+    }
 }
