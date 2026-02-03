@@ -462,8 +462,8 @@ pub fn get_or_create_tick_array_by_discriminator<'info>(
 ) -> Result<AccountInfo<'info>> {
     // Check if account exists and has a discriminator
     let is_dynamic = if tick_array_account_info.owner == &system_program::ID {
-        // Account doesn't exist yet - default to fixed for backward compatibility
-        false
+        // Account doesn't exist yet - default to Dynamic for new tick arrays
+        true
     } else {
         // Account exists - check discriminator
         let account_data = tick_array_account_info.try_borrow_data()?;
