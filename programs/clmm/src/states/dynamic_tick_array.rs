@@ -543,4 +543,22 @@ mod tests {
         tick.serialize(&mut bytes).unwrap();
         assert_eq!(bytes.len(), DynamicTick::INITIALIZED_LEN);
     }
+
+    #[test]
+    fn test_tick_serialization_round_trip() {
+        let original = DynamicTick::Initialized(DynamicTickData {
+            liquidity_net: 12345,
+            liquidity_gross: 67890,
+            fee_growth_outside_0_x64: 111,
+            fee_growth_outside_1_x64: 222,
+            reward_growths_outside: [333, 444, 555],
+        });
+
+        let mut bytes = Vec::new();
+        original.serialize(&mut bytes).unwrap();
+
+        let deserialized = DynamicTick::deserialize(&mut &bytes[..]).unwrap();
+        
+        assert_eq!(original, deserialized);
+    }
 }
