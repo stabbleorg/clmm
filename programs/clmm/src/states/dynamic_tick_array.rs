@@ -561,4 +561,78 @@ mod tests {
         
         assert_eq!(original, deserialized);
     }
+
+    #[test]
+    fn test_bitmap_set_on_initialize() {
+        let mut loader = DynamicTickArrayLoader::default();
+
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+        assert_eq!(loader.initialized_tick_count(), 0);
+
+        let update = TickUpdate {
+            initialized: true,
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+
+        loader.update_tick(0, 10, &update).unwrap();
+
+        assert_eq!(loader.initialized_tick_count(), 1);
+    }
+
+    #[test]
+    fn test_bitmap_clear_on_uninitialize() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+        let init_update = TickUpdate {
+            initialized: true,
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+
+        loader.update_tick(0, 10, &init_update).unwrap();
+        assert_eq!(loader.initialized_tick_count(), 1);
+
+        let uninit_update = TickUpdate {
+            initialized: false,
+            liquidity_net: 0,
+            liquidity_gross: 0,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+
+        loader.update_tick(0, 10, &uninit_update).unwrap();
+        assert_eq!(loader.initialized_tick_count(), 0);
+    }
+
+    #[test]
+    fn test_bitmap_multiple_ticks() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+        
+        let init_update = TickUpdate {
+            initialized: true,
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+    
+        // Initialize 3 ticks: 0, 10, 20
+        loader.update_tick(0, 10, &init_update).unwrap();
+        loader.update_tick(10, 10, &init_update).unwrap();
+        loader.update_tick(20, 10, &init_update).unwrap();
+    
+        assert_eq!(loader.initialized_tick_count(), 3);
+    }
 }
