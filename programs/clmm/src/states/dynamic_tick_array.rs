@@ -784,4 +784,75 @@ mod tests {
         assert!(!initialized);
     }
 
+    #[test]
+    fn test_bitmap_correct_bit_position() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+        let init_update = TickUpdate {
+            initialized: true,
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+
+        // Initialize tick at index 20 (offset 2)
+        loader.update_tick(20, 10, &init_update).unwrap();
+
+        // Verify bit 2 is set (0b100 = 4)
+        let bitmap = loader.tick_bitmap();
+        assert_eq!(bitmap, 0b100);  // Only bit 2 should be set
+
+        // Initialize tick at index 50 (offset 5)
+        loader.update_tick(50, 10, &init_update).unwrap();
+
+        // Verify bits 2 and 5 are set (0b100100 = 36)
+        let bitmap = loader.tick_bitmap();
+        assert_eq!(bitmap, 0b100100);
+    }
+
+    #[test]
+    fn test_bitmap_correct_bit_reset_on_uninitialize() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+        let init_update = TickUpdate {
+            initialized: true,
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+
+        // Initialize ticks at 20 (offset 2) and 50 (offset 5)
+        loader.update_tick(20, 10, &init_update).unwrap();
+        loader.update_tick(50, 10, &init_update).unwrap();
+        assert_eq!(loader.tick_bitmap(), 0b100100);  // bits 2 and 5
+
+        // Uninitialize tick 20 (offset 2)
+        let uninit_update = TickUpdate {
+            initialized: false,
+            liquidity_net: 0,
+            liquidity_gross: 0,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+        loader.update_tick(20, 10, &uninit_update).unwrap();
+
+        // Verify only bit 5 remains (0b100000 = 32)
+        let bitmap = loader.tick_bitmap();
+        assert_eq!(bitmap, 0b100000);
+
+        // Uninitialize tick 50 (offset 5)
+        loader.update_tick(50, 10, &uninit_update).unwrap();
+
+        // Verify all bits cleared
+        let bitmap = loader.tick_bitmap();
+        assert_eq!(bitmap, 0b0);
+    }
+
 }
