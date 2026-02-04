@@ -518,6 +518,7 @@ impl DynamicTickArrayLoader {
 mod tests {
     use super::*;
 
+    /// GIVEN an uninitialized tick WHEN serialized THEN the output is 1 byte
     #[test]
     fn test_uninitialized_tick_serialization_size() {
         let tick = DynamicTick::Uninitialized;
@@ -529,6 +530,7 @@ mod tests {
     }
 
 
+    /// GIVEN an initialized tick with data WHEN serialized THEN the output is 113 bytes
     #[test]
     fn test_initialized_tick_serialization_size() {
         let tick = DynamicTick::Initialized(DynamicTickData {
@@ -544,6 +546,7 @@ mod tests {
         assert_eq!(bytes.len(), DynamicTick::INITIALIZED_LEN);
     }
 
+    /// GIVEN an initialized tick WHEN serialized and deserialized THEN the data is preserved
     #[test]
     fn test_tick_serialization_round_trip() {
         let original = DynamicTick::Initialized(DynamicTickData {
@@ -562,6 +565,7 @@ mod tests {
         assert_eq!(original, deserialized);
     }
 
+    /// GIVEN an empty tick array WHEN a tick is initialized THEN the bitmap count increases
     #[test]
     fn test_bitmap_set_on_initialize() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -584,6 +588,7 @@ mod tests {
         assert_eq!(loader.initialized_tick_count(), 1);
     }
 
+    /// GIVEN an initialized tick WHEN it is uninitialized THEN the bitmap count decreases
     #[test]
     fn test_bitmap_clear_on_uninitialize() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -614,6 +619,7 @@ mod tests {
         assert_eq!(loader.initialized_tick_count(), 0);
     }
 
+    /// GIVEN an empty tick array WHEN multiple ticks are initialized THEN all are tracked in bitmap, the bitmap count increases
     #[test]
     fn test_bitmap_multiple_ticks() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -636,6 +642,7 @@ mod tests {
         assert_eq!(loader.initialized_tick_count(), 3);
     }
 
+    /// GIVEN an uninitialized tick (liquidity_gross=0) WHEN it is initialized (liquidity_gross>0) THEN update returns true indicating a tick state transition
     #[test]
     fn test_update_tick_returns_flip_on_initialize() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -654,6 +661,7 @@ mod tests {
         assert!(flipped);
     }
 
+    /// GIVEN an already initialized tick (liquidity_gross>0) WHEN more liquidity is added THEN update returns false (no state transition, tick stays initialized)
     #[test]
     fn test_update_tick_no_flip_when_already_initialized() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -684,6 +692,7 @@ mod tests {
         assert!(!flipped_2nd_time); // Should not flip if tick is already initialized
     }
 
+    /// GIVEN a tick with data WHEN written and read via loader THEN data is preserved
     #[test]
     fn test_tick_data_round_trip() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -716,6 +725,7 @@ mod tests {
         assert_eq!(rewards, [333, 444, 555]);
     }
 
+    /// GIVEN initialized ticks at various positions WHEN searching for next tick THEN correct tick indices are returned
     #[test]
     fn test_get_next_init_tick_index() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -759,6 +769,7 @@ mod tests {
         assert_eq!(next, Some(20));
     }
 
+    /// GIVEN an initialized tick WHEN cleared THEN the tick becomes uninitialized and bitmap count decreases
     #[test]
     fn test_clear_tick() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -784,6 +795,7 @@ mod tests {
         assert!(!initialized);
     }
 
+    /// GIVEN ticks at specific offsets WHEN initialized THEN the correct bitmap bits are set (bit position = tick_offset = (tick_index - start_tick_index) / tick_spacing)
     #[test]
     fn test_bitmap_correct_bit_position() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -813,6 +825,7 @@ mod tests {
         assert_eq!(bitmap, 0b100100);
     }
 
+    /// GIVEN initialized ticks with their bitmap bits set WHEN uninitialized THEN the correct bitmap bits are cleared (bit position = tick_offset)
     #[test]
     fn test_bitmap_correct_bit_reset_on_uninitialize() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -855,6 +868,7 @@ mod tests {
         assert_eq!(bitmap, 0b0);
     }
 
+    /// GIVEN existing ticks WHEN a new tick is initialized in the middle THEN data shifts right and existing data is preserved
     #[test]
     fn test_data_integrity_after_shift_on_initialize() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -927,6 +941,7 @@ mod tests {
         assert_eq!(t60_rewards, [6004, 6005, 6006]);
     }
 
+    /// GIVEN multiple initialized ticks WHEN a middle tick is uninitialized THEN data shifts left and remaining data is preserved
     #[test]
     fn test_data_integrity_after_shift_on_uninitialize() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -1009,6 +1024,7 @@ mod tests {
         assert_eq!(t60_rewards, [6004, 6005, 6006]);
     }
 
+    /// GIVEN a tick array with negative start_tick_index WHEN ticks are initialized THEN operations work correctly with negative indices
     #[test]
     fn test_negative_start_tick_index() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -1058,6 +1074,7 @@ mod tests {
         assert_eq!(next, Some(-500));
     }
 
+    /// GIVEN a tick array WHEN first (offset 0) and last (offset 59) ticks are initialized THEN boundary ticks work correctly
     #[test]
     fn test_edge_cases_first_and_last_tick() {
         let mut loader = DynamicTickArrayLoader::default();
@@ -1101,6 +1118,7 @@ mod tests {
         assert_eq!(next_right, Some(590), "Searching right from 300 should find 590");
     }
 
+    /// GIVEN tick position relative to current price WHEN tick is initialized THEN fee_growth_outside is set correctly (global if tick <= current, zero otherwise)
     #[test]
     fn test_dynamic_tick_update_fee_initialization() {
         // Test the DynamicTick::update() fee initialization logic:
