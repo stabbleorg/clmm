@@ -855,4 +855,158 @@ mod tests {
         assert_eq!(bitmap, 0b0);
     }
 
+    #[test]
+    fn test_data_integrity_after_shift_on_initialize() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+        // Initialize tick 40 with unique data
+        let update_40 = TickUpdate {
+            initialized: true,
+            liquidity_net: 4000,
+            liquidity_gross: 4001,
+            fee_growth_outside_0_x64: 4002,
+            fee_growth_outside_1_x64: 4003,
+            reward_growths_outside: [4004, 4005, 4006],
+        };
+        loader.update_tick(40, 10, &update_40).unwrap();
+
+        // Initialize tick 60 with unique data
+        let update_60 = TickUpdate {
+            initialized: true,
+            liquidity_net: 6000,
+            liquidity_gross: 6001,
+            fee_growth_outside_0_x64: 6002,
+            fee_growth_outside_1_x64: 6003,
+            reward_growths_outside: [6004, 6005, 6006],
+        };
+        loader.update_tick(60, 10, &update_60).unwrap();
+
+        // Now initialize tick 50 IN THE MIDDLE - this causes tick 60's data to shift right
+        let update_50 = TickUpdate {
+            initialized: true,
+            liquidity_net: 5000,
+            liquidity_gross: 5001,
+            fee_growth_outside_0_x64: 5002,
+            fee_growth_outside_1_x64: 5003,
+            reward_growths_outside: [5004, 5005, 5006],
+        };
+        loader.update_tick(50, 10, &update_50).unwrap();
+
+        // Verify tick 40 data is still intact (copy to local vars for packed struct)
+        let tick_40 = loader.get_tick(40, 10).unwrap();
+        let t40_liq_net = tick_40.liquidity_net;
+        let t40_liq_gross = tick_40.liquidity_gross;
+        let t40_fee_0 = tick_40.fee_growth_outside_0_x64;
+        let t40_fee_1 = tick_40.fee_growth_outside_1_x64;
+        let t40_rewards = tick_40.reward_growths_outside;
+        assert_eq!(t40_liq_net, 4000);
+        assert_eq!(t40_liq_gross, 4001);
+        assert_eq!(t40_fee_0, 4002);
+        assert_eq!(t40_fee_1, 4003);
+        assert_eq!(t40_rewards, [4004, 4005, 4006]);
+
+        // Verify tick 50 data is correct
+        let tick_50 = loader.get_tick(50, 10).unwrap();
+        let t50_liq_net = tick_50.liquidity_net;
+        let t50_liq_gross = tick_50.liquidity_gross;
+        assert_eq!(t50_liq_net, 5000);
+        assert_eq!(t50_liq_gross, 5001);
+
+        // CRITICAL: Verify tick 60 data is still intact after the shift!
+        let tick_60 = loader.get_tick(60, 10).unwrap();
+        let t60_liq_net = tick_60.liquidity_net;
+        let t60_liq_gross = tick_60.liquidity_gross;
+        let t60_fee_0 = tick_60.fee_growth_outside_0_x64;
+        let t60_fee_1 = tick_60.fee_growth_outside_1_x64;
+        let t60_rewards = tick_60.reward_growths_outside;
+        assert_eq!(t60_liq_net, 6000);
+        assert_eq!(t60_liq_gross, 6001);
+        assert_eq!(t60_fee_0, 6002);
+        assert_eq!(t60_fee_1, 6003);
+        assert_eq!(t60_rewards, [6004, 6005, 6006]);
+    }
+
+    #[test]
+    fn test_data_integrity_after_shift_on_uninitialize() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+        // Initialize ticks at 40, 50, 60 with unique data
+        let update_40 = TickUpdate {
+            initialized: true,
+            liquidity_net: 4000,
+            liquidity_gross: 4001,
+            fee_growth_outside_0_x64: 4002,
+            fee_growth_outside_1_x64: 4003,
+            reward_growths_outside: [4004, 4005, 4006],
+        };
+        loader.update_tick(40, 10, &update_40).unwrap();
+
+        let update_50 = TickUpdate {
+            initialized: true,
+            liquidity_net: 5000,
+            liquidity_gross: 5001,
+            fee_growth_outside_0_x64: 5002,
+            fee_growth_outside_1_x64: 5003,
+            reward_growths_outside: [5004, 5005, 5006],
+        };
+        loader.update_tick(50, 10, &update_50).unwrap();
+
+        let update_60 = TickUpdate {
+            initialized: true,
+            liquidity_net: 6000,
+            liquidity_gross: 6001,
+            fee_growth_outside_0_x64: 6002,
+            fee_growth_outside_1_x64: 6003,
+            reward_growths_outside: [6004, 6005, 6006],
+        };
+        loader.update_tick(60, 10, &update_60).unwrap();
+
+        assert_eq!(loader.initialized_tick_count(), 3);
+
+        // Now UNINITIALIZE tick 50 in the middle - this causes tick 60's data to shift LEFT
+        let uninit_update = TickUpdate {
+            initialized: false,
+            liquidity_net: 0,
+            liquidity_gross: 0,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+        loader.update_tick(50, 10, &uninit_update).unwrap();
+
+        assert_eq!(loader.initialized_tick_count(), 2);
+
+        // Verify tick 40 data is still intact (copy to local vars for packed struct)
+        let tick_40 = loader.get_tick(40, 10).unwrap();
+        let t40_liq_net = tick_40.liquidity_net;
+        let t40_liq_gross = tick_40.liquidity_gross;
+        let t40_fee_0 = tick_40.fee_growth_outside_0_x64;
+        let t40_fee_1 = tick_40.fee_growth_outside_1_x64;
+        let t40_rewards = tick_40.reward_growths_outside;
+        assert_eq!(t40_liq_net, 4000);
+        assert_eq!(t40_liq_gross, 4001);
+        assert_eq!(t40_fee_0, 4002);
+        assert_eq!(t40_fee_1, 4003);
+        assert_eq!(t40_rewards, [4004, 4005, 4006]);
+
+        // Verify tick 50 is now uninitialized
+        let tick_50 = loader.get_tick(50, 10).unwrap();
+        assert!(!tick_50.initialized);
+
+        // CRITICAL: Verify tick 60 data is still intact after the shift LEFT!
+        let tick_60 = loader.get_tick(60, 10).unwrap();
+        let t60_liq_net = tick_60.liquidity_net;
+        let t60_liq_gross = tick_60.liquidity_gross;
+        let t60_fee_0 = tick_60.fee_growth_outside_0_x64;
+        let t60_fee_1 = tick_60.fee_growth_outside_1_x64;
+        let t60_rewards = tick_60.reward_growths_outside;
+        assert_eq!(t60_liq_net, 6000);
+        assert_eq!(t60_liq_gross, 6001);
+        assert_eq!(t60_fee_0, 6002);
+        assert_eq!(t60_fee_1, 6003);
+        assert_eq!(t60_rewards, [6004, 6005, 6006]);
+    }
+
 }
