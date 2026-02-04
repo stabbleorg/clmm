@@ -751,6 +751,12 @@ mod tests {
         // Search left from tick 0 - finds tick 0 itself (a_to_b includes current)
         let next = loader.get_next_init_tick_index(0, 10, true).unwrap();
         assert_eq!(next, Some(0));
+
+        // If we search from tick 35 (between 30 and 40):
+        let next = loader.get_next_init_tick_index(35, 10, true).unwrap();
+        // This would return Some(20) - the next init tick to the left
+        // Because offset(35) = 3 → tick 30, but 30 isn't initialized, so find 20
+        assert_eq!(next, Some(20));
     }
 
     #[test]
