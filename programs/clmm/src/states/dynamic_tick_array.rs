@@ -1100,4 +1100,109 @@ mod tests {
         let next_right = loader.get_next_init_tick_index(300, 10, false).unwrap();
         assert_eq!(next_right, Some(590), "Searching right from 300 should find 590");
     }
+
+    #[test]
+    fn test_dynamic_tick_update_fee_initialization() {
+        // Test the DynamicTick::update() fee initialization logic:
+        // - When tick_index <= tick_current: fee_growth_outside = fee_growth_global
+        // - When tick_index > tick_current: fee_growth_outside = 0
+        
+        let reward_infos: [RewardInfo; REWARD_NUM] = Default::default();
+        
+        // Case 1: tick_index <= tick_current (tick is below current price)
+        // Fee growth should be set to global values
+        {
+            let mut tick = DynamicTick::Uninitialized;
+            let tick_index = 100;
+            let tick_current = 200;  // Current price is above this tick
+            let fee_growth_global_0 = 1000u128;
+            let fee_growth_global_1 = 2000u128;
+            
+            let flipped = tick.update(
+                tick_index,
+                tick_current,
+                1000,  // Add liquidity
+                fee_growth_global_0,
+                fee_growth_global_1,
+                false,  // lower tick
+                &reward_infos,
+            ).unwrap();
+            
+            assert!(flipped, "Should flip from uninitialized to initialized");
+            
+            if let DynamicTick::Initialized(data) = tick {
+                // Fee growth outside should be set to global values
+                assert_eq!(data.fee_growth_outside_0_x64, fee_growth_global_0,
+                    "Fee growth 0 should equal global when tick <= current");
+                assert_eq!(data.fee_growth_outside_1_x64, fee_growth_global_1,
+                    "Fee growth 1 should equal global when tick <= current");
+                assert_eq!(data.liquidity_net, 1000, "Lower tick should add liquidity");
+            } else {
+                panic!("Tick should be initialized");
+            }
+        }
+        
+        // Case 2: tick_index > tick_current (tick is above current price)
+        // Fee growth should be zero
+        {
+            let mut tick = DynamicTick::Uninitialized;
+            let tick_index = 300;
+            let tick_current = 200;  // Current price is below this tick
+            let fee_growth_global_0 = 1000u128;
+            let fee_growth_global_1 = 2000u128;
+            
+            let flipped = tick.update(
+                tick_index,
+                tick_current,
+                1000,  // Add liquidity
+                fee_growth_global_0,
+                fee_growth_global_1,
+                true,  // upper tick
+                &reward_infos,
+            ).unwrap();
+            
+            assert!(flipped, "Should flip from uninitialized to initialized");
+            
+            if let DynamicTick::Initialized(data) = tick {
+                // Fee growth outside should be ZERO (tick is above current)
+                assert_eq!(data.fee_growth_outside_0_x64, 0,
+                    "Fee growth 0 should be zero when tick > current");
+                assert_eq!(data.fee_growth_outside_1_x64, 0,
+                    "Fee growth 1 should be zero when tick > current");
+                assert_eq!(data.liquidity_net, -1000, "Upper tick should subtract liquidity");
+            } else {
+                panic!("Tick should be initialized");
+            }
+        }
+        
+        // Case 3: tick_index == tick_current (boundary case)
+        // By convention (<= means include), fee growth should be set to global values
+        {
+            let mut tick = DynamicTick::Uninitialized;
+            let tick_index = 200;
+            let tick_current = 200;  // Current price is exactly at this tick
+            let fee_growth_global_0 = 5000u128;
+            let fee_growth_global_1 = 6000u128;
+            
+            tick.update(
+                tick_index,
+                tick_current,
+                500,
+                fee_growth_global_0,
+                fee_growth_global_1,
+                false,
+                &reward_infos,
+            ).unwrap();
+            
+            if let DynamicTick::Initialized(data) = tick {
+                // At boundary (==), fee growth should equal global (due to <=)
+                assert_eq!(data.fee_growth_outside_0_x64, fee_growth_global_0,
+                    "Fee growth 0 should equal global when tick == current");
+                assert_eq!(data.fee_growth_outside_1_x64, fee_growth_global_1,
+                    "Fee growth 1 should equal global when tick == current");
+            } else {
+                panic!("Tick should be initialized");
+            }
+        }
+    }
 }
