@@ -1009,4 +1009,95 @@ mod tests {
         assert_eq!(t60_rewards, [6004, 6005, 6006]);
     }
 
+    #[test]
+    fn test_negative_start_tick_index() {
+        let mut loader = DynamicTickArrayLoader::default();
+        // Initialize with negative start_tick_index (common in real pools)
+        loader.initialize(-600, 10, Pubkey::default()).unwrap();
+
+        // Verify start_tick_index
+        assert_eq!(loader.start_tick_index(), -600);
+
+        // Initialize tick at -600 (offset 0)
+        let update = TickUpdate {
+            initialized: true,
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+        loader.update_tick(-600, 10, &update).unwrap();
+
+        // Initialize tick at -500 (offset 10)
+        loader.update_tick(-500, 10, &update).unwrap();
+
+        // Initialize tick at -10 (offset 59, last tick in array)
+        // -600 + (59 * 10) = -600 + 590 = -10
+        loader.update_tick(-10, 10, &update).unwrap();
+
+        assert_eq!(loader.initialized_tick_count(), 3);
+
+        // Verify we can read back the ticks
+        let tick_first = loader.get_tick(-600, 10).unwrap();
+        assert!(tick_first.initialized);
+
+        let tick_middle = loader.get_tick(-500, 10).unwrap();
+        assert!(tick_middle.initialized);
+
+        let tick_last = loader.get_tick(-10, 10).unwrap();
+        assert!(tick_last.initialized);
+
+        // Verify get_next_init_tick_index works with negative indices
+        // From -550, searching left should find -600
+        let next = loader.get_next_init_tick_index(-550, 10, true).unwrap();
+        assert_eq!(next, Some(-600));
+
+        // From -550, searching right should find -500
+        let next = loader.get_next_init_tick_index(-550, 10, false).unwrap();
+        assert_eq!(next, Some(-500));
+    }
+
+    #[test]
+    fn test_edge_cases_first_and_last_tick() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+        let update = TickUpdate {
+            initialized: true,
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+
+        // First tick in array: offset 0
+        loader.update_tick(0, 10, &update).unwrap();
+        
+        // Last tick in array: offset 59 (TICK_ARRAY_SIZE - 1)
+        // tick_index = start_tick_index + (offset * tick_spacing) = 0 + (59 * 10) = 590
+        loader.update_tick(590, 10, &update).unwrap();
+
+        assert_eq!(loader.initialized_tick_count(), 2);
+
+        // Verify bitmap has bits 0 and 59 set
+        let bitmap = loader.tick_bitmap();
+        assert!(bitmap & (1 << 0) != 0, "Bit 0 should be set");
+        assert!(bitmap & (1 << 59) != 0, "Bit 59 should be set");
+
+        // Verify we can read both ticks
+        let tick_first = loader.get_tick(0, 10).unwrap();
+        assert!(tick_first.initialized);
+
+        let tick_last = loader.get_tick(590, 10).unwrap();
+        assert!(tick_last.initialized);
+
+        // Verify search from middle finds first/last correctly
+        let next_left = loader.get_next_init_tick_index(300, 10, true).unwrap();
+        assert_eq!(next_left, Some(0), "Searching left from 300 should find 0");
+
+        let next_right = loader.get_next_init_tick_index(300, 10, false).unwrap();
+        assert_eq!(next_right, Some(590), "Searching right from 300 should find 590");
+    }
 }
