@@ -635,4 +635,84 @@ mod tests {
     
         assert_eq!(loader.initialized_tick_count(), 3);
     }
+
+    #[test]
+    fn test_update_tick_returns_flip_on_initialize() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+        let update = TickUpdate {
+            initialized: true,
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+
+        let flipped = loader.update_tick(0, 10, &update).unwrap();
+        assert!(flipped);
+    }
+
+    #[test]
+    fn test_update_tick_no_flip_when_already_initialized() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+        let update = TickUpdate {
+            initialized: true,
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+
+        let flipped = loader.update_tick(0, 10, &update).unwrap();
+        assert!(flipped);
+
+        let update2 = TickUpdate {
+            initialized: true,
+            liquidity_net: 200,  // Changed
+            liquidity_gross: 200,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+
+        let flipped_2nd_time = loader.update_tick(0, 10, &update2).unwrap();
+        assert!(!flipped_2nd_time); // Should not flip if tick is already initialized
+    }
+
+    #[test]
+    fn test_tick_data_round_trip() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+        let update = TickUpdate {
+            initialized: true,
+            liquidity_net: 12345,
+            liquidity_gross: 67890,
+            fee_growth_outside_0_x64: 111,
+            fee_growth_outside_1_x64: 222,
+            reward_growths_outside: [333, 444, 555],
+        };
+
+        loader.update_tick(0, 10, &update).unwrap();
+
+        let tick = loader.get_tick(0, 10).unwrap();
+
+        let initialized = tick.initialized;
+        let liquidity_net = tick.liquidity_net;
+        let liquidity_gross = tick.liquidity_gross;
+        let fee_growth_0 = tick.fee_growth_outside_0_x64;
+        let fee_growth_1 = tick.fee_growth_outside_1_x64;
+        let rewards = tick.reward_growths_outside;
+        assert!(initialized);
+        assert_eq!(liquidity_net, 12345);
+        assert_eq!(liquidity_gross, 67890);
+        assert_eq!(fee_growth_0, 111);
+        assert_eq!(fee_growth_1, 222);
+        assert_eq!(rewards, [333, 444, 555]);
+    }
 }
