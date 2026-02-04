@@ -715,4 +715,67 @@ mod tests {
         assert_eq!(fee_growth_1, 222);
         assert_eq!(rewards, [333, 444, 555]);
     }
+
+    #[test]
+    fn test_get_next_init_tick_index() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+            
+        let update = TickUpdate {
+            initialized: true,
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+
+        // Initialize ticks at 0, 20, 40
+        loader.update_tick(0, 10, &update).unwrap();
+        loader.update_tick(20, 10, &update).unwrap();
+        loader.update_tick(40, 10, &update).unwrap();
+
+        // Search right from tick 0 (a_to_b = false)
+        let next = loader.get_next_init_tick_index(0, 10, false).unwrap();
+        assert_eq!(next, Some(20));
+
+        // Search left from tick 40 (a_to_b = true)
+        let next = loader.get_next_init_tick_index(40, 10, true).unwrap();
+        assert_eq!(next, Some(40));
+
+        // Search right from tick 40 - nothing there
+        let next = loader.get_next_init_tick_index(40, 10, false).unwrap();
+        assert_eq!(next, None);
+
+        // Search left from tick 0 - finds tick 0 itself (a_to_b includes current)
+        let next = loader.get_next_init_tick_index(0, 10, true).unwrap();
+        assert_eq!(next, Some(0));
+    }
+
+    #[test]
+    fn test_clear_tick() {
+        let mut loader = DynamicTickArrayLoader::default();
+        loader.initialize(0, 10, Pubkey::default()).unwrap();
+
+        let update = TickUpdate {
+            initialized: true,
+            liquidity_net: 100,
+            liquidity_gross: 100,
+            fee_growth_outside_0_x64: 0,
+            fee_growth_outside_1_x64: 0,
+            reward_growths_outside: [0; REWARD_NUM],
+        };
+        loader.update_tick(0, 10, &update).unwrap();
+        assert_eq!(loader.initialized_tick_count(), 1);
+
+        loader.clear_tick(0, 10).unwrap();
+
+        assert_eq!(loader.initialized_tick_count(), 0);
+
+        let tick = loader.get_tick(0, 10).unwrap();
+        let initialized = tick.initialized;
+        assert!(!initialized);
+    }
+
 }
