@@ -362,7 +362,7 @@ impl TickArrayType for TickArrayState {
         }
         let tick_state = self.ticks[offset as usize];
         Ok(Tick {
-            initialized: true,
+            initialized: tick_state.liquidity_gross != 0,
             liquidity_net: tick_state.liquidity_net,
             liquidity_gross: tick_state.liquidity_gross,
             fee_growth_outside_0_x64: tick_state.fee_growth_outside_0_x64,
