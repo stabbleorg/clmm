@@ -282,11 +282,7 @@ impl TickArrayType for TickArrayState {
     }
 
     fn initialized_tick_count(&self) -> u8 {
-        let mut count: u8 = 0;
-        for tick_state in &self.ticks {
-            if tick_state.liquidity_gross > 0 { count += 1 }
-        }
-        count
+        self.initialized_tick_count
     }
 
     /// Search for the next initialized tick in this array.
