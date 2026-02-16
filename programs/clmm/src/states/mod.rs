@@ -7,7 +7,7 @@ pub mod protocol_position;
 pub mod support_mint_associated;
 pub mod fixed_tick_array;
 pub mod tickarray_bitmap_extension;
-mod tick_array;
+pub mod tick_array;
 mod tick;
 mod dynamic_tick_array;
 

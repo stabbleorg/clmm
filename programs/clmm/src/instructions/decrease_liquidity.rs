@@ -286,64 +286,71 @@ pub fn burn_liquidity<'c: 'info, 'info>(
     // Check if both ticks are in the same array
     let is_same_array = tick_array_lower_info.key() == tick_array_upper_info.key();
     
-    let (tick_lower_array, tick_upper_array) = tick_arrays.get_mut_refs();
-    require_keys_eq!(tick_lower_array.pool(), pool_state.key());
-    if let Some(upper_array) = tick_upper_array.as_ref() {
-        require_keys_eq!(upper_array.pool(), pool_state.key());
-    }
-    
-    // Capture upper array information before moving tick_upper_array
-    let (upper_is_variable_size, upper_start_tick_index) = if is_same_array {
-        (
-            tick_lower_array.is_variable_size(),
-            tick_lower_array.start_tick_index(),
-        )
-    } else {
-        let upper_array_ref = tick_upper_array.as_ref().unwrap();
-        (
-            upper_array_ref.is_variable_size(),
-            upper_array_ref.start_tick_index(),
-        )
+    // Capture array information before moving into modify_position
+    let (lower_is_variable_size, lower_start_tick_index, upper_is_variable_size, upper_start_tick_index) = {
+        let (tick_lower_array, tick_upper_array) = tick_arrays.get_mut_refs();
+        require_keys_eq!(tick_lower_array.pool(), pool_state.key());
+        if let Some(upper_array) = tick_upper_array.as_ref() {
+            require_keys_eq!(upper_array.pool(), pool_state.key());
+        }
+        
+        let lower_is_variable = tick_lower_array.is_variable_size();
+        let lower_start = tick_lower_array.start_tick_index();
+        
+        let (upper_is_variable, upper_start) = if is_same_array {
+            (lower_is_variable, lower_start)
+        } else {
+            let upper_array_ref = tick_upper_array.as_ref().unwrap();
+            (upper_array_ref.is_variable_size(), upper_array_ref.start_tick_index())
+        };
+        
+        (lower_is_variable, lower_start, upper_is_variable, upper_start)
     };
     
     let liquidity_before = pool_state.liquidity;
     let clock = Clock::get()?;
-    let result = modify_position(
-        -i128::try_from(liquidity).unwrap(),
-        pool_state,
-        tick_lower_array,
-        tick_upper_array,
-        tick_lower_index,
-        tick_upper_index,
-        clock.unix_timestamp as u64,
-    )?;
+    let result = {
+        let (tick_lower_array, tick_upper_array) = tick_arrays.get_mut_refs();
+        modify_position(
+            -i128::try_from(liquidity).unwrap(),
+            pool_state,
+            tick_lower_array,
+            tick_upper_array,
+            tick_lower_index,
+            tick_upper_index,
+            clock.unix_timestamp as u64,
+        )?
+    }; // Drop mutable borrows here
     
     // Handle tick array bitmap updates when ticks are flipped (uninitialized)
+    // Now safe to load arrays again since previous borrows are dropped
     if result.tick_lower_flipped {
-        // For fixed arrays, update initialized_tick_count
-        if !tick_lower_array.is_variable_size() {
+        // For fixed arrays, update initialized_tick_count and get the new count
+        let after_init_tick_count = if !lower_is_variable_size {
             // It's a fixed array, load it as FixedTickArray and decrement the count
             let fixed_loader = AccountLoad::<FixedTickArray>::try_from_unchecked(
                 &crate::id(),
                 tick_array_lower_info,
             )?;
-            fixed_loader.load_mut()?.update_initialized_tick_count(false)?;
-        }
-        // For dynamic arrays, initialized_tick_count is computed from bitmap, so no update needed
+            let count = fixed_loader.load_mut()?.update_initialized_tick_count(false)?;
+            count
+        } else {
+            // For dynamic arrays, initialized_tick_count is computed from bitmap
+            let tick_array = load_tick_array_mut(tick_array_lower_info, &pool_state.key())?;
+            tick_array.initialized_tick_count()
+        };
         
-        // Check if the tick array is now empty
-        let after_init_tick_count = tick_lower_array.initialized_tick_count();
         if after_init_tick_count == 0 {
             pool_state.flip_tick_array_bit(
                 tickarray_bitmap_extension,
-                tick_lower_array.start_tick_index(),
+                lower_start_tick_index,
             )?;
         }
     }
     
     if result.tick_upper_flipped {
-        // For fixed arrays, update initialized_tick_count
-        if !upper_is_variable_size {
+        // For fixed arrays, update initialized_tick_count and get the new count
+        let after_init_tick_count = if !upper_is_variable_size {
             let tick_array_info = if is_same_array {
                 tick_array_lower_info
             } else {
@@ -353,17 +360,17 @@ pub fn burn_liquidity<'c: 'info, 'info>(
                 &crate::id(),
                 tick_array_info,
             )?;
-            fixed_loader.load_mut()?.update_initialized_tick_count(false)?;
-        }
-        // For dynamic arrays, initialized_tick_count is computed from bitmap, so no update needed
-        
-        // Check if the tick array is now empty
-        let after_init_tick_count = if is_same_array {
-            tick_lower_array.initialized_tick_count()
+            let count = fixed_loader.load_mut()?.update_initialized_tick_count(false)?;
+            count
         } else {
-            // Re-load the upper array to get the updated count
-            let upper_tick_array = load_tick_array_mut(tick_array_upper_info, &pool_state.key())?;
-            upper_tick_array.initialized_tick_count()
+            // For dynamic arrays, initialized_tick_count is computed from bitmap
+            let tick_array_info = if is_same_array {
+                tick_array_lower_info
+            } else {
+                tick_array_upper_info
+            };
+            let tick_array = load_tick_array_mut(tick_array_info, &pool_state.key())?;
+            tick_array.initialized_tick_count()
         };
         
         if after_init_tick_count == 0 {

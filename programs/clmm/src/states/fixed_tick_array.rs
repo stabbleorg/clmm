@@ -116,13 +116,13 @@ impl FixedTickArray {
         Ok(())
     }
 
-    pub fn update_initialized_tick_count(&mut self, add: bool) -> Result<()> {
+    pub fn update_initialized_tick_count(&mut self, add: bool) -> Result<u8> {
         if add {
             self.initialized_tick_count += 1;
         } else {
             self.initialized_tick_count -= 1;
         }
-        Ok(())
+        Ok(self.initialized_tick_count)
     }
 
     pub fn get_tick_state_mut(
