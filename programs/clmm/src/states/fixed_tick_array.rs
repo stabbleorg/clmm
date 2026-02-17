@@ -381,7 +381,9 @@ impl TickArrayType for TickArrayState {
         tick_index: i32,
         tick_spacing: u16,
         update: &TickUpdate,
+        account_info: Option<&AccountInfo>,
     ) -> Result<bool> {
+        // Fixed arrays don't use account_info for realloc (fixed size)
         if !self.check_in_array_bounds(tick_index, tick_spacing)
             || !Tick::check_is_usable_tick(tick_index, tick_spacing)
         {
@@ -581,7 +583,7 @@ pub fn check_tick_array_start_index(
         StabbleErrorCode::TickUpperOverflow
     );
     require_eq!(0, tick_index % i32::from(tick_spacing));
-    let expect_start_index = TickArrayState::get_array_start_index(tick_index, tick_spacing);
+    let expect_start_index = FixedTickArray::get_array_start_index(tick_index, tick_spacing);
     require_eq!(tick_array_start_index, expect_start_index);
     Ok(())
 }

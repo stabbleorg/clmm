@@ -35,6 +35,7 @@ pub trait TickArrayType {
         tick_index: i32,
         tick_spacing: u16,
         update: &TickUpdate,
+        account_info: Option<&AccountInfo>,
     ) -> Result<bool>;
 
     /// Clears the tick at the given tick_index (CLMM pool tick index, not array index)
@@ -180,7 +181,7 @@ pub trait TickArrayType {
 
         // Update the tick back to the array
         let tick_update = TickUpdate::from(tick);
-        self.update_tick(tick_index, tick_spacing, &tick_update)?;
+        self.update_tick(tick_index, tick_spacing, &tick_update, None)?;
 
         Ok(liquidity_net)
     }

@@ -318,6 +318,8 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
             tick_lower_index,
             tick_upper_index,
             clock.unix_timestamp as u64,
+            Some(tick_array_lower_info),
+            Some(tick_array_upper_info),
         )?
     }; // Drop mutable borrows here
 

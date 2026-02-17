@@ -127,4 +127,8 @@ pub enum ErrorCode {
     AccountDiscriminatorMismatch,
     #[msg("Account isn't owned by our program")]
     AccountOwnedByWrongProgram,
+    
+    // Rent calculation errors
+    #[msg("Failed to calculate rent for tick array")]
+    RentCalculationError,
 }

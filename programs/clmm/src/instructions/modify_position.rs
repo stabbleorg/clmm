@@ -1,5 +1,5 @@
 use std::cell::RefMut;
-use anchor_lang::prelude::msg;
+use anchor_lang::prelude::{msg, AccountInfo};
 use crate::instructions::LiquidityChangeResult;
 use crate::libraries;
 use crate::states::{get_fee_growth_inside, get_reward_growths_inside, LoadedTickArrayMut, PoolState, RewardInfo, TickArrayType, TickUpdate};
@@ -7,7 +7,7 @@ use crate::states::{get_fee_growth_inside, get_reward_growths_inside, LoadedTick
 use std::convert::identity;
 use crate::libraries::liquidity_math;
 
-pub fn modify_position(
+pub fn modify_position<'info>(
     liquidity_delta: i128,
     pool_state: &mut RefMut<PoolState>,
     tick_lower_array: &mut LoadedTickArrayMut,
@@ -15,6 +15,8 @@ pub fn modify_position(
     tick_lower_index: i32,
     tick_upper_index: i32,
     timestamp: u64,
+    tick_lower_account_info: Option<&AccountInfo<'info>>,
+    tick_upper_account_info: Option<&AccountInfo<'info>>,
 ) -> anchor_lang::Result<LiquidityChangeResult> {
     let updated_reward_infos = pool_state.update_reward_infos(timestamp)?;
 
@@ -88,7 +90,7 @@ pub fn modify_position(
             reward_growths_outside: lower_rewards,
         };
         // Update tick state and find if tick is flipped
-        flipped_lower = tick_lower_array.update_tick(tick_lower_index, pool_state.tick_spacing, lower_tick_update)?;
+        flipped_lower = tick_lower_array.update_tick(tick_lower_index, pool_state.tick_spacing, lower_tick_update, tick_lower_account_info)?;
 
         let upper_liquidity_net_after = tick_upper.liquidity_net
             .checked_sub(liquidity_delta)
@@ -106,11 +108,11 @@ pub fn modify_position(
         match tick_upper_array {
             None => {
                 // Both ticks are in the same array
-                flipped_upper = tick_lower_array.update_tick(tick_upper_index, pool_state.tick_spacing, upper_tick_update)?;
+                flipped_upper = tick_lower_array.update_tick(tick_upper_index, pool_state.tick_spacing, upper_tick_update, tick_lower_account_info)?;
             }
             Some(ref mut upper_array) => {
                 // Upper tick is in a different array
-                flipped_upper = upper_array.update_tick(tick_upper_index, pool_state.tick_spacing, upper_tick_update)?;
+                flipped_upper = upper_array.update_tick(tick_upper_index, pool_state.tick_spacing, upper_tick_update, tick_upper_account_info)?;
             }
         }
 
