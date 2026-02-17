@@ -8,6 +8,7 @@ use crate::libraries::{
     tick_math,
 };
 use crate::states::{TickArrayState, POOL_TICK_ARRAY_BITMAP_SEED};
+use crate::states::tick_array::{check_is_valid_start_index, get_array_start_index, tick_count};
 use anchor_lang::prelude::*;
 use std::ops::BitXor;
 
@@ -54,7 +55,7 @@ impl TickArrayBitmapExtension {
 
     fn get_bitmap_offset(tick_index: i32, tick_spacing: u16) -> Result<usize> {
         require!(
-            TickArrayState::check_is_valid_start_index(tick_index, tick_spacing),
+            check_is_valid_start_index(tick_index, tick_spacing),
             ErrorCode::InvalidTickIndex
         );
         Self::check_extension_boundary(tick_index, tick_spacing)?;
@@ -132,16 +133,16 @@ impl TickArrayBitmapExtension {
         tick_spacing: u16,
         zero_for_one: bool,
     ) -> Result<(bool, i32)> {
-        let multiplier = TickArrayState::tick_count(tick_spacing);
+        let multiplier = tick_count(tick_spacing);
         let next_tick_array_start_index = if zero_for_one {
             last_tick_array_start_index - multiplier
         } else {
             last_tick_array_start_index + multiplier
         };
         let min_tick_array_start_index =
-            TickArrayState::get_array_start_index(tick_math::MIN_TICK, tick_spacing);
+            get_array_start_index(tick_math::MIN_TICK, tick_spacing);
         let max_tick_array_start_index =
-            TickArrayState::get_array_start_index(tick_math::MAX_TICK, tick_spacing);
+            get_array_start_index(tick_math::MAX_TICK, tick_spacing);
 
         if next_tick_array_start_index < min_tick_array_start_index
             || next_tick_array_start_index > max_tick_array_start_index
@@ -184,7 +185,7 @@ impl TickArrayBitmapExtension {
 
             if next_bit.is_some() {
                 let next_array_start_index = next_tick_array_start_index
-                    - i32::from(next_bit.unwrap()) * TickArrayState::tick_count(tick_spacing);
+                    - i32::from(next_bit.unwrap()) * tick_count(tick_spacing);
                 return (true, next_array_start_index);
             } else {
                 // not found til to the end
@@ -202,13 +203,13 @@ impl TickArrayBitmapExtension {
             };
             if next_bit.is_some() {
                 let next_array_start_index = next_tick_array_start_index
-                    + i32::from(next_bit.unwrap()) * TickArrayState::tick_count(tick_spacing);
+                    + i32::from(next_bit.unwrap()) * tick_count(tick_spacing);
                 return (true, next_array_start_index);
             } else {
                 // not found til to the end
                 return (
                     false,
-                    bitmap_max_tick_boundary - TickArrayState::tick_count(tick_spacing),
+                    bitmap_max_tick_boundary - tick_count(tick_spacing),
                 );
             }
         }
@@ -216,7 +217,7 @@ impl TickArrayBitmapExtension {
 
     pub fn tick_array_offset_in_bitmap(tick_array_start_index: i32, tick_spacing: u16) -> i32 {
         let m = tick_array_start_index.abs() % max_tick_in_tickarray_bitmap(tick_spacing);
-        let mut tick_array_offset_in_bitmap = m / TickArrayState::tick_count(tick_spacing);
+        let mut tick_array_offset_in_bitmap = m / tick_count(tick_spacing);
         if tick_array_start_index < 0 && m != 0 {
             tick_array_offset_in_bitmap = TICK_ARRAY_BITMAP_SIZE - tick_array_offset_in_bitmap;
         }
@@ -625,7 +626,7 @@ pub mod tick_array_bitmap_extension_test {
             let tick_boundary = max_tick_in_tickarray_bitmap(tick_spacing);
             let mut start_index = tick_boundary;
             let mut expect_index;
-            let loop_count = (TickArrayState::get_array_start_index(MAX_TICK, tick_spacing)
+            let loop_count = (get_array_start_index(MAX_TICK, tick_spacing)
                 - start_index)
                 / (i32::from(tick_spacing) * TICK_ARRAY_SIZE);
             for _i in 0..loop_count {

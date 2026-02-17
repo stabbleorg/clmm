@@ -6,6 +6,7 @@ use crate::libraries::{
     tick_array_bit_map, tick_math,
 };
 use crate::states::*;
+use crate::states::tick_array::{check_is_valid_start_index, get_array_start_index, tick_count};
 use crate::util::get_recent_epoch;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program_option::COption;
@@ -435,11 +436,11 @@ impl PoolState {
 
     pub fn get_tick_array_offset(&self, tick_array_start_index: i32) -> Result<usize> {
         require!(
-            TickArrayState::check_is_valid_start_index(tick_array_start_index, self.tick_spacing),
+            check_is_valid_start_index(tick_array_start_index, self.tick_spacing),
             ErrorCode::InvalidTickIndex
         );
         let tick_array_offset_in_bitmap = tick_array_start_index
-            / TickArrayState::tick_count(self.tick_spacing)
+            / tick_count(self.tick_spacing)
             + tick_array_bit_map::TICK_ARRAY_BITMAP_SIZE;
         Ok(tick_array_offset_in_bitmap as usize)
     }
@@ -483,7 +484,7 @@ impl PoolState {
                 tickarray_bitmap_extension
                     .unwrap()
                     .check_tick_array_is_initialized(
-                        TickArrayState::get_array_start_index(self.tick_current, self.tick_spacing),
+                        get_array_start_index(self.tick_current, self.tick_spacing),
                         self.tick_spacing,
                     )?
             } else {
@@ -498,7 +499,7 @@ impl PoolState {
         }
         let next_start_index = self.next_initialized_tick_array_start_index(
             tickarray_bitmap_extension,
-            TickArrayState::get_array_start_index(self.tick_current, self.tick_spacing),
+            get_array_start_index(self.tick_current, self.tick_spacing),
             zero_for_one,
         )?;
         require!(
@@ -515,7 +516,7 @@ impl PoolState {
         zero_for_one: bool,
     ) -> Result<Option<i32>> {
         last_tick_array_start_index =
-            TickArrayState::get_array_start_index(last_tick_array_start_index, self.tick_spacing);
+            get_array_start_index(last_tick_array_start_index, self.tick_spacing);
 
         loop {
             let (is_found, start_index) =
@@ -579,7 +580,7 @@ impl PoolState {
             self.tick_array_start_index_range();
         for tick_index in tick_indexs {
             let tick_array_start_index =
-                TickArrayState::get_array_start_index(tick_index, self.tick_spacing);
+                get_array_start_index(tick_index, self.tick_spacing);
             if tick_array_start_index >= max_tick_array_index_boundary
                 || tick_array_start_index < min_tick_array_start_index_boundary
             {
@@ -598,13 +599,13 @@ impl PoolState {
         let mut min_tick_boundary = -max_tick_boundary;
         if max_tick_boundary > tick_math::MAX_TICK {
             max_tick_boundary =
-                TickArrayState::get_array_start_index(tick_math::MAX_TICK, self.tick_spacing);
+                get_array_start_index(tick_math::MAX_TICK, self.tick_spacing);
             // find the next tick array start index
-            max_tick_boundary = max_tick_boundary + TickArrayState::tick_count(self.tick_spacing);
+            max_tick_boundary = max_tick_boundary + tick_count(self.tick_spacing);
         }
         if min_tick_boundary < tick_math::MIN_TICK {
             min_tick_boundary =
-                TickArrayState::get_array_start_index(tick_math::MIN_TICK, self.tick_spacing);
+                get_array_start_index(tick_math::MIN_TICK, self.tick_spacing);
         }
         (min_tick_boundary, max_tick_boundary)
     }

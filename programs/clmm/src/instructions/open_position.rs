@@ -2,6 +2,7 @@ use crate::error::ErrorCode;
 use crate::libraries::liquidity_math;
 use crate::libraries::tick_math;
 use crate::states::*;
+use crate::states::tick_array::{check_tick_array_start_index, check_ticks_order};
 use crate::states::tick_array::load_tick_array_mut;
 use crate::util::*;
 use anchor_lang::prelude::*;

@@ -4,6 +4,7 @@ use arrayref::array_ref;
 use crate::error::ErrorCode;
 use crate::libraries::liquidity_math;
 use crate::states::{PoolState, RewardInfo, Tick, TickArrayType, TickState, TickUpdate, REWARD_NUM, TICK_ARRAY_SIZE, TICK_ARRAY_SIZE_USIZE, TICK_ARRAY_SEED};
+use crate::states::tick_array::check_is_valid_start_index;
 use crate::util::create_or_allocate_account;
 use crate::Result;
 
@@ -231,10 +232,8 @@ impl DynamicTickArrayLoader {
         tick_array_start_index: i32,
         tick_spacing: u16,
     ) -> Result<AccountInfo<'info>> {
-        // Use TickArrayState's validation function since it's shared logic
-        use crate::states::fixed_tick_array::TickArrayState;
         require!(
-            TickArrayState::check_is_valid_start_index(tick_array_start_index, tick_spacing),
+            check_is_valid_start_index(tick_array_start_index, tick_spacing),
             ErrorCode::InvalidTickIndex
         );
 
@@ -314,8 +313,7 @@ impl DynamicTickArrayLoader {
         tick_spacing: u16,
         pool_key: Pubkey,
     ) -> Result<()> {
-        use crate::states::fixed_tick_array::TickArrayState;
-        TickArrayState::check_is_valid_start_index(start_index, tick_spacing);
+        check_is_valid_start_index(start_index, tick_spacing);
         self.0[Self::START_TICK_INDEX_OFFSET..Self::START_TICK_INDEX_OFFSET + 4]
             .copy_from_slice(&start_index.to_le_bytes());
         self.0[Self::POOL_OFFSET..Self::POOL_OFFSET + 32]

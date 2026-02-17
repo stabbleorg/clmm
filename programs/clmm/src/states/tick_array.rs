@@ -495,3 +495,68 @@ pub fn get_or_create_tick_array_by_discriminator<'info>(
         ).map(|loader| loader.to_account_info())
     }
 }
+
+/// Calculate the number of ticks in a tick array given a tick spacing
+pub fn tick_count(tick_spacing: u16) -> i32 {
+    TICK_ARRAY_SIZE * i32::from(tick_spacing)
+}
+
+/// Get the start index of the tick array that contains the given tick index
+/// 
+/// Input an arbitrary tick_index, output the start_index of the tick_array it sits on
+pub fn get_array_start_index(tick_index: i32, tick_spacing: u16) -> i32 {
+    let ticks_in_array = tick_count(tick_spacing);
+    let mut start = tick_index / ticks_in_array;
+    if tick_index < 0 && tick_index % ticks_in_array != 0 {
+        start = start - 1
+    }
+    start * ticks_in_array
+}
+
+/// Check if a given tick index is a valid start index for a tick array
+pub fn check_is_valid_start_index(tick_index: i32, tick_spacing: u16) -> bool {
+    if check_is_out_of_boundary(tick_index) {
+        if tick_index > MAX_TICK {
+            return false;
+        }
+        let min_start_index = get_array_start_index(MIN_TICK, tick_spacing);
+        return tick_index == min_start_index;
+    }
+    tick_index % tick_count(tick_spacing) == 0
+}
+
+/// Common check for a valid tick input.
+/// A tick is valid if it lies within tick boundaries
+pub fn check_is_out_of_boundary(tick: i32) -> bool {
+    tick < MIN_TICK || tick > MAX_TICK
+}
+
+/// Validate that a tick array start index matches the expected start index for a given tick
+pub fn check_tick_array_start_index(
+    tick_array_start_index: i32,
+    tick_index: i32,
+    tick_spacing: u16,
+) -> Result<()> {
+    require!(
+        tick_index >= MIN_TICK,
+        StabbleErrorCode::TickLowerOverflow
+    );
+    require!(
+        tick_index <= MAX_TICK,
+        StabbleErrorCode::TickUpperOverflow
+    );
+    require_eq!(0, tick_index % i32::from(tick_spacing));
+    let expect_start_index = get_array_start_index(tick_index, tick_spacing);
+    require_eq!(tick_array_start_index, expect_start_index);
+    Ok(())
+}
+
+/// Common checks for valid tick inputs.
+/// Ensures tick_lower_index < tick_upper_index
+pub fn check_ticks_order(tick_lower_index: i32, tick_upper_index: i32) -> Result<()> {
+    require!(
+        tick_lower_index < tick_upper_index,
+        StabbleErrorCode::TickInvalidOrder
+    );
+    Ok(())
+}

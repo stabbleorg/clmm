@@ -8,6 +8,7 @@ use anchor_lang::{prelude::*, system_program};
 #[cfg(feature = "enable-log")]
 use std::convert::identity;
 use crate::states::{Tick, TickArrayType, TickUpdate, TICK_ARRAY_SEED, TICK_ARRAY_SIZE, TICK_ARRAY_SIZE_USIZE};
+use crate::states::tick_array::{check_is_valid_start_index, get_array_start_index, tick_count, check_is_out_of_boundary};
 
 // The actual type should still be called TickArray so that it derives
 // the correct discriminator. This same rename is done in the SDKs to make the distinction clear between
@@ -54,7 +55,7 @@ impl FixedTickArray {
         tick_spacing: u16,
     ) -> Result<AccountLoad<'info, TickArrayState>> {
         require!(
-            TickArrayState::check_is_valid_start_index(tick_array_start_index, tick_spacing),
+            check_is_valid_start_index(tick_array_start_index, tick_spacing),
             StabbleErrorCode::InvalidTickIndex
         );
 
@@ -109,7 +110,7 @@ impl FixedTickArray {
         tick_spacing: u16,
         pool_key: Pubkey,
     ) -> Result<()> {
-        TickArrayState::check_is_valid_start_index(start_index, tick_spacing);
+        check_is_valid_start_index(start_index, tick_spacing);
         self.start_tick_index = start_index;
         self.pool_id = pool_key;
         self.recent_epoch = get_recent_epoch()?;
@@ -148,7 +149,7 @@ impl FixedTickArray {
 
     /// Get tick's offset in current tick array, tick must be include in tick array， otherwise throw an error
     fn get_tick_offset_in_array(self, tick_index: i32, tick_spacing: u16) -> Result<usize> {
-        let start_tick_index = TickArrayState::get_array_start_index(tick_index, tick_spacing);
+        let start_tick_index = get_array_start_index(tick_index, tick_spacing);
         require_eq!(
             start_tick_index,
             self.start_tick_index,
@@ -191,7 +192,7 @@ impl FixedTickArray {
         zero_for_one: bool,
     ) -> Result<Option<&mut TickState>> {
         let current_tick_array_start_index =
-            TickArrayState::get_array_start_index(current_tick_index, tick_spacing);
+            get_array_start_index(current_tick_index, tick_spacing);
         if current_tick_array_start_index != self.start_tick_index {
             return Ok(None);
         }
@@ -219,38 +220,12 @@ impl FixedTickArray {
 
     /// Base on swap directioin, return the next tick array start index.
     pub fn next_tick_arrary_start_index(&self, tick_spacing: u16, zero_for_one: bool) -> i32 {
-        let ticks_in_array = TICK_ARRAY_SIZE * i32::from(tick_spacing);
+        let ticks_in_array = tick_count(tick_spacing);
         if zero_for_one {
             self.start_tick_index - ticks_in_array
         } else {
             self.start_tick_index + ticks_in_array
         }
-    }
-
-    /// Input an arbitrary tick_index, output the start_index of the tick_array it sits on
-    pub fn get_array_start_index(tick_index: i32, tick_spacing: u16) -> i32 {
-        let ticks_in_array = TickArrayState::tick_count(tick_spacing);
-        let mut start = tick_index / ticks_in_array;
-        if tick_index < 0 && tick_index % ticks_in_array != 0 {
-            start = start - 1
-        }
-        start * ticks_in_array
-    }
-
-    pub fn check_is_valid_start_index(tick_index: i32, tick_spacing: u16) -> bool {
-        if TickState::check_is_out_of_boundary(tick_index) {
-            if tick_index > tick_math::MAX_TICK {
-                return false;
-            }
-            let min_start_index =
-                TickArrayState::get_array_start_index(tick_math::MIN_TICK, tick_spacing);
-            return tick_index == min_start_index;
-        }
-        tick_index % TickArrayState::tick_count(tick_spacing) == 0
-    }
-
-    pub fn tick_count(tick_spacing: u16) -> i32 {
-        TICK_ARRAY_SIZE * i32::from(tick_spacing)
     }
 }
 
@@ -459,7 +434,7 @@ impl TickState {
     pub const LEN: usize = 4 + 16 + 16 + 16 + 16 + 16 * REWARD_NUM + 16 + 16 + 8 + 8 + 4;
 
     pub fn initialize(&mut self, tick: i32, tick_spacing: u16) -> Result<()> {
-        if TickState::check_is_out_of_boundary(tick) {
+        if check_is_out_of_boundary(tick) {
             return err!(StabbleErrorCode::InvalidTickIndex);
         }
         require!(
@@ -562,38 +537,4 @@ impl TickState {
         self.liquidity_gross != 0
     }
 
-    /// Common checks for a valid tick input.
-    /// A tick is valid if it lies within tick boundaries
-    pub fn check_is_out_of_boundary(tick: i32) -> bool {
-        tick < tick_math::MIN_TICK || tick > tick_math::MAX_TICK
-    }
-}
-
-pub fn check_tick_array_start_index(
-    tick_array_start_index: i32,
-    tick_index: i32,
-    tick_spacing: u16,
-) -> Result<()> {
-    require!(
-        tick_index >= tick_math::MIN_TICK,
-        StabbleErrorCode::TickLowerOverflow
-    );
-    require!(
-        tick_index <= tick_math::MAX_TICK,
-        StabbleErrorCode::TickUpperOverflow
-    );
-    require_eq!(0, tick_index % i32::from(tick_spacing));
-    let expect_start_index = FixedTickArray::get_array_start_index(tick_index, tick_spacing);
-    require_eq!(tick_array_start_index, expect_start_index);
-    Ok(())
-}
-
-/// Common checks for valid tick inputs.
-///
-pub fn check_ticks_order(tick_lower_index: i32, tick_upper_index: i32) -> Result<()> {
-    require!(
-        tick_lower_index < tick_upper_index,
-        StabbleErrorCode::TickInvalidOrder
-    );
-    Ok(())
 }
