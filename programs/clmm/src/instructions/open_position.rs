@@ -328,47 +328,67 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     // Handle realloc for dynamic tick arrays
     // Grow: transfer rent first, then realloc
     // Shrink: just realloc, no rent transfer
-    if result.tick_array_realloc.lower_grow {
-        // transfer rent from payer to tick_array_lower_info
-        // realloc tick_array_lower_info up by DynamicTickData::LEN
-        let new_size = tick_array_lower_info.data_len() + DynamicTickData::LEN;
-        let required_lamports = Rent::get()?.minimum_balance(new_size);
-        let current_lamports = tick_array_lower_info.lamports();
-        if required_lamports > current_lamports {
-            // transfer the difference from payer
-            let diff = required_lamports - current_lamports;
-            anchor_lang::system_program::transfer(
-                CpiContext::new(
-                    system_program.to_account_info(),
-                    anchor_lang::system_program::Transfer {
-                        from: payer.to_account_info(),
-                        to: tick_array_lower_info.clone(),
-                    },
-                ),
-                diff,
+    if is_same_array {
+        // Both ticks in same account — combine deltas into one realloc
+        let mut delta: i64 = 0;
+        if result.tick_array_realloc.lower_grow { delta += DynamicTickData::LEN as i64; }
+        if result.tick_array_realloc.lower_shrink { delta -= DynamicTickData::LEN as i64; }
+        if result.tick_array_realloc.upper_grow { delta += DynamicTickData::LEN as i64; }
+        if result.tick_array_realloc.upper_shrink { delta -= DynamicTickData::LEN as i64; }
+        if delta > 0 {
+            let new_size = (tick_array_lower_info.data_len() as i64 + delta) as usize;
+            let required_lamports = Rent::get()?.minimum_balance(new_size);
+            let current_lamports = tick_array_lower_info.lamports();
+            if required_lamports > current_lamports {
+                let diff = required_lamports - current_lamports;
+                anchor_lang::system_program::transfer(
+                    CpiContext::new(
+                        system_program.to_account_info(),
+                        anchor_lang::system_program::Transfer {
+                            from: payer.to_account_info(),
+                            to: tick_array_lower_info.clone(),
+                        },
+                    ),
+                    diff,
+                )?;
+            }
+            tick_array_lower_info.realloc(new_size, true)?;
+        } else if delta < 0 {
+            let new_size = (tick_array_lower_info.data_len() as i64 + delta) as usize;
+            tick_array_lower_info.realloc(new_size, true)?;
+        }
+    } else {
+        // Different accounts — handle lower and upper independently
+        if result.tick_array_realloc.lower_grow {
+            let new_size = tick_array_lower_info.data_len() + DynamicTickData::LEN;
+            let required_lamports = Rent::get()?.minimum_balance(new_size);
+            let current_lamports = tick_array_lower_info.lamports();
+            if required_lamports > current_lamports {
+                let diff = required_lamports - current_lamports;
+                anchor_lang::system_program::transfer(
+                    CpiContext::new(
+                        system_program.to_account_info(),
+                        anchor_lang::system_program::Transfer {
+                            from: payer.to_account_info(),
+                            to: tick_array_lower_info.clone(),
+                        },
+                    ),
+                    diff,
+                )?;
+            }
+            tick_array_lower_info.realloc(new_size, true)?;
+        }
+        if result.tick_array_realloc.lower_shrink {
+            tick_array_lower_info.realloc(
+                tick_array_lower_info.data_len() - DynamicTickData::LEN,
+                true,
             )?;
         }
-        tick_array_lower_info.realloc(new_size, true)?;
-    }
-
-    if result.tick_array_realloc.lower_shrink {
-        // realloc tick_array_lower_info down by DynamicTickData::LEN
-        tick_array_lower_info.realloc(
-            tick_array_lower_info.data_len() - DynamicTickData::LEN,
-            true,
-        )?;
-    }
-
-    // same for upper (but check is_same_array to avoid doing it twice)
-    if !is_same_array {
-        // upper grow / upper shrink
         if result.tick_array_realloc.upper_grow {
             let new_size = tick_array_upper_info.data_len() + DynamicTickData::LEN;
             let required_lamports = Rent::get()?.minimum_balance(new_size);
             let current_lamports = tick_array_upper_info.lamports();
-
             if required_lamports > current_lamports {
-                // transfer the difference from payer
                 let diff = required_lamports - current_lamports;
                 anchor_lang::system_program::transfer(
                     CpiContext::new(
@@ -383,7 +403,6 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
             }
             tick_array_upper_info.realloc(new_size, true)?;
         }
-
         if result.tick_array_realloc.upper_shrink {
             tick_array_upper_info.realloc(
                 tick_array_upper_info.data_len() - DynamicTickData::LEN,

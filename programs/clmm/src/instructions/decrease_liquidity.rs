@@ -323,18 +323,25 @@ pub fn burn_liquidity<'c: 'info, 'info>(
     }; // Drop mutable borrows here
     
     // Realloc for dynamic tick arrays (shrink only, no rent refund)
-    if result.tick_array_realloc.lower_shrink {
-        tick_array_lower_info.realloc(
-            tick_array_lower_info.data_len() - DynamicTickData::LEN,
-          true,
-        )?;
-    }
-    
-    if !is_same_array {
+    if is_same_array {
+        let mut delta: i64 = 0;
+        if result.tick_array_realloc.lower_shrink { delta -= DynamicTickData::LEN as i64; }
+        if result.tick_array_realloc.upper_shrink { delta -= DynamicTickData::LEN as i64; }
+        if delta < 0 {
+            let new_size = (tick_array_lower_info.data_len() as i64 + delta) as usize;
+            tick_array_lower_info.realloc(new_size, true)?;
+        }
+    } else {
+        if result.tick_array_realloc.lower_shrink {
+            tick_array_lower_info.realloc(
+                tick_array_lower_info.data_len() - DynamicTickData::LEN,
+                true,
+            )?;
+        }
         if result.tick_array_realloc.upper_shrink {
             tick_array_upper_info.realloc(
                 tick_array_upper_info.data_len() - DynamicTickData::LEN,
-              true,
+                true,
             )?;
         }
     }
