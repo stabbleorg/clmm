@@ -19,6 +19,11 @@ solana_security_txt::security_txt! {
 declare_id!("6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6");
 pub mod admin {
     use super::{pubkey, Pubkey};
+
+    #[cfg(feature = "testing")]
+    pub const ID: Pubkey = pubkey!("7qYDaJTwrm4myf19cKGq2wrkSuuzy3LQ771mu6BEakhg");
+
+    #[cfg(not(feature = "testing"))]
     pub const ID: Pubkey = pubkey!("3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2");
 }
 

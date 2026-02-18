@@ -24,6 +24,7 @@ no-log-ix-name = []
 enable-log = []
 devnet = []
 paramset = []
+testing = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]
