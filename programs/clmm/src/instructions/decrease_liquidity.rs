@@ -319,11 +319,26 @@ pub fn burn_liquidity<'c: 'info, 'info>(
             tick_lower_index,
             tick_upper_index,
             clock.unix_timestamp as u64,
-            Some(tick_array_lower_info),
-            Some(tick_array_upper_info),
         )?
     }; // Drop mutable borrows here
     
+    // Realloc for dynamic tick arrays (shrink only, no rent refund)
+    if result.tick_array_realloc.lower_shrink {
+        tick_array_lower_info.realloc(
+            tick_array_lower_info.data_len() - DynamicTickData::LEN,
+          true,
+        )?;
+    }
+    
+    if !is_same_array {
+        if result.tick_array_realloc.upper_shrink {
+            tick_array_upper_info.realloc(
+                tick_array_upper_info.data_len() - DynamicTickData::LEN,
+              true,
+            )?;
+        }
+    }
+
     // Handle tick array bitmap updates when ticks are flipped (uninitialized)
     // Now safe to load arrays again since previous borrows are dropped
     if result.tick_lower_flipped {

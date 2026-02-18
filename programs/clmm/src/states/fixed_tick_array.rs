@@ -356,7 +356,6 @@ impl TickArrayType for TickArrayState {
         tick_index: i32,
         tick_spacing: u16,
         update: &TickUpdate,
-        account_info: Option<&AccountInfo>,
     ) -> Result<bool> {
         // Fixed arrays don't use account_info for realloc (fixed size)
         if !self.check_in_array_bounds(tick_index, tick_spacing)

@@ -2,7 +2,7 @@ use std::cell::RefMut;
 use anchor_lang::prelude::{msg, AccountInfo};
 use crate::instructions::LiquidityChangeResult;
 use crate::libraries;
-use crate::states::{get_fee_growth_inside, get_reward_growths_inside, LoadedTickArrayMut, PoolState, RewardInfo, TickArrayType, TickUpdate};
+use crate::states::{LoadedTickArrayMut, PoolState, RewardInfo, TickArrayRealloc, TickArrayType, TickUpdate, get_fee_growth_inside, get_reward_growths_inside};
 #[cfg(feature = "enable-log")]
 use std::convert::identity;
 use crate::libraries::liquidity_math;
@@ -15,13 +15,15 @@ pub fn modify_position<'info>(
     tick_lower_index: i32,
     tick_upper_index: i32,
     timestamp: u64,
-    tick_lower_account_info: Option<&AccountInfo<'info>>,
-    tick_upper_account_info: Option<&AccountInfo<'info>>,
 ) -> anchor_lang::Result<LiquidityChangeResult> {
     let updated_reward_infos = pool_state.update_reward_infos(timestamp)?;
 
     let mut flipped_lower = false;
     let mut flipped_upper = false;
+    let mut lower_needs_grow = false;
+    let mut lower_needs_shrink = false;
+    let mut upper_needs_grow = false;
+    let mut upper_needs_shrink = false;
     
     // Check if both ticks are in the same array
     let is_same_array = tick_upper_array.is_none();
@@ -89,8 +91,10 @@ pub fn modify_position<'info>(
             fee_growth_outside_1_x64: lower_fee_1,
             reward_growths_outside: lower_rewards,
         };
+        lower_needs_grow = tick_lower_array.is_variable_size() && !tick_lower.initialized && lower_tick_update.initialized;
+        lower_needs_shrink = tick_lower_array.is_variable_size() && tick_lower.initialized && !lower_tick_update.initialized;
         // Update tick state and find if tick is flipped
-        flipped_lower = tick_lower_array.update_tick(tick_lower_index, pool_state.tick_spacing, lower_tick_update, tick_lower_account_info)?;
+        flipped_lower = tick_lower_array.update_tick(tick_lower_index, pool_state.tick_spacing, lower_tick_update)?;
 
         let upper_liquidity_net_after = tick_upper.liquidity_net
             .checked_sub(liquidity_delta)
@@ -104,15 +108,24 @@ pub fn modify_position<'info>(
             reward_growths_outside: upper_rewards,
         };
 
+        let upper_is_variable = if is_same_array {
+            tick_lower_array.is_variable_size()
+        } else {
+            tick_upper_array.as_ref().unwrap().is_variable_size()
+        };
+
+        upper_needs_grow = upper_is_variable && !tick_upper.initialized && upper_tick_update.initialized;
+        upper_needs_shrink = upper_is_variable && tick_upper.initialized && !upper_tick_update.initialized;
+
         // Update upper tick - use the same array if both ticks are in the same array
         match tick_upper_array {
             None => {
                 // Both ticks are in the same array
-                flipped_upper = tick_lower_array.update_tick(tick_upper_index, pool_state.tick_spacing, upper_tick_update, tick_lower_account_info)?;
+                flipped_upper = tick_lower_array.update_tick(tick_upper_index, pool_state.tick_spacing, upper_tick_update)?;
             }
             Some(ref mut upper_array) => {
                 // Upper tick is in a different array
-                flipped_upper = upper_array.update_tick(tick_upper_index, pool_state.tick_spacing, upper_tick_update, tick_upper_account_info)?;
+                flipped_upper = upper_array.update_tick(tick_upper_index, pool_state.tick_spacing, upper_tick_update)?;
             }
         }
 
@@ -149,17 +162,17 @@ pub fn modify_position<'info>(
 
     if liquidity_delta < 0 {
         if flipped_lower {
-            tick_lower_array.clear_tick(tick_lower_index, pool_state.tick_spacing);
+            tick_lower_array.clear_tick(tick_lower_index, pool_state.tick_spacing)?;
         }
         if flipped_upper {
             match tick_upper_array {
                 None => {
                     // Both ticks are in the same array
-                    tick_lower_array.clear_tick(tick_upper_index, pool_state.tick_spacing);
+                    tick_lower_array.clear_tick(tick_upper_index, pool_state.tick_spacing)?;
                 }
                 Some(ref mut upper_array) => {
                     // Upper tick is in a different array
-                    upper_array.clear_tick(tick_upper_index, pool_state.tick_spacing);
+                    upper_array.clear_tick(tick_upper_index, pool_state.tick_spacing)?;
                 }
             }
         }
@@ -194,5 +207,11 @@ pub fn modify_position<'info>(
         fee_growth_inside_0_x64: fee_growth_inside_0_x64,
         fee_growth_inside_1_x64: fee_growth_inside_1_x64,
         reward_growths_inside: reward_growths_inside,
+        tick_array_realloc: TickArrayRealloc {
+            lower_grow: lower_needs_grow,
+            lower_shrink: lower_needs_shrink,
+            upper_grow: upper_needs_grow,
+            upper_shrink: upper_needs_shrink
+        }
     })
 }

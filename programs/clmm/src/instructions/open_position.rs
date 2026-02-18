@@ -2,11 +2,12 @@ use crate::error::ErrorCode;
 use crate::libraries::liquidity_math;
 use crate::libraries::tick_math;
 use crate::states::*;
-use crate::states::tick_array::{check_tick_array_start_index, check_ticks_order};
+use crate::states::tick_array::{check_tick_array_start_index, check_ticks_order, TickArrayRealloc};
 use crate::states::tick_array::load_tick_array_mut;
 use crate::util::*;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program;
+use anchor_lang::system_program;
 use anchor_lang::system_program::{transfer, Transfer};
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::metadata::{
@@ -26,7 +27,6 @@ use std::cell::RefMut;
 #[cfg(feature = "enable-log")]
 use std::convert::identity;
 use std::ops::Deref;
-use anchor_lang::solana_program::system_program;
 use crate::instructions::modify_position;
 use arrayref::array_ref;
 
@@ -123,6 +123,7 @@ pub fn open_position<'a, 'b, 'c: 'info, 'info>(
             ..
         } = add_liquidity(
             payer,
+            system_program,
             token_account_0,
             token_account_1,
             token_vault_0,
@@ -208,11 +209,13 @@ pub struct LiquidityChangeResult {
     pub fee_growth_inside_0_x64: u128,
     pub fee_growth_inside_1_x64: u128,
     pub reward_growths_inside: [u128; 3],
+    pub tick_array_realloc: TickArrayRealloc
 }
 
 /// Add liquidity to an initialized pool
 pub fn add_liquidity<'b, 'c: 'info, 'info>(
     payer: &'b Signer<'info>,
+    system_program: &'b Program<'info, System>,
     token_account_0: &'b AccountInfo<'info>,
     token_account_1: &'b AccountInfo<'info>,
     token_vault_0: &'b AccountInfo<'info>,
@@ -318,11 +321,76 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
             tick_upper_array,
             tick_lower_index,
             tick_upper_index,
-            clock.unix_timestamp as u64,
-            Some(tick_array_lower_info),
-            Some(tick_array_upper_info),
+            clock.unix_timestamp as u64
         )?
     }; // Drop mutable borrows here
+
+    // Handle realloc for dynamic tick arrays
+    // Grow: transfer rent first, then realloc
+    // Shrink: just realloc, no rent transfer
+    if result.tick_array_realloc.lower_grow {
+        // transfer rent from payer to tick_array_lower_info
+        // realloc tick_array_lower_info up by DynamicTickData::LEN
+        let new_size = tick_array_lower_info.data_len() + DynamicTickData::LEN;
+        let required_lamports = Rent::get()?.minimum_balance(new_size);
+        let current_lamports = tick_array_lower_info.lamports();
+        if required_lamports > current_lamports {
+            // transfer the difference from payer
+            let diff = required_lamports - current_lamports;
+            anchor_lang::system_program::transfer(
+                CpiContext::new(
+                    system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: payer.to_account_info(),
+                        to: tick_array_lower_info.clone(),
+                    },
+                ),
+                diff,
+            )?;
+        }
+        tick_array_lower_info.realloc(new_size, true)?;
+    }
+
+    if result.tick_array_realloc.lower_shrink {
+        // realloc tick_array_lower_info down by DynamicTickData::LEN
+        tick_array_lower_info.realloc(
+            tick_array_lower_info.data_len() - DynamicTickData::LEN,
+            true,
+        )?;
+    }
+
+    // same for upper (but check is_same_array to avoid doing it twice)
+    if !is_same_array {
+        // upper grow / upper shrink
+        if result.tick_array_realloc.upper_grow {
+            let new_size = tick_array_upper_info.data_len() + DynamicTickData::LEN;
+            let required_lamports = Rent::get()?.minimum_balance(new_size);
+            let current_lamports = tick_array_upper_info.lamports();
+
+            if required_lamports > current_lamports {
+                // transfer the difference from payer
+                let diff = required_lamports - current_lamports;
+                anchor_lang::system_program::transfer(
+                    CpiContext::new(
+                        system_program.to_account_info(),
+                        anchor_lang::system_program::Transfer {
+                            from: payer.to_account_info(),
+                            to: tick_array_upper_info.clone(),
+                        },
+                    ),
+                    diff,
+                )?;
+            }
+            tick_array_upper_info.realloc(new_size, true)?;
+        }
+
+        if result.tick_array_realloc.upper_shrink {
+            tick_array_upper_info.realloc(
+                tick_array_upper_info.data_len() - DynamicTickData::LEN,
+                true,
+            )?;
+        }
+    }
 
     // Handle tick array bitmap updates when ticks are flipped
     // Now safe to load arrays again since previous borrows are dropped

@@ -89,6 +89,7 @@ pub struct IncreaseLiquidityV2<'info> {
     //     bump
     // )]
     // pub tick_array_bitmap: AccountLoader<'info, TickArrayBitmapExtension>,
+    pub system_program: Program<'info, System>
 }
 
 pub fn increase_liquidity_v2<'a, 'b, 'c: 'info, 'info>(
@@ -100,6 +101,7 @@ pub fn increase_liquidity_v2<'a, 'b, 'c: 'info, 'info>(
 ) -> Result<()> {
     increase_liquidity(
         &ctx.accounts.nft_owner,
+        &ctx.accounts.system_program,
         &ctx.accounts.pool_state,
         &mut ctx.accounts.personal_position,
         &ctx.accounts.tick_array_lower,

@@ -407,7 +407,6 @@ impl TickArrayType for DynamicTickArrayLoader {
         tick_index: i32,
         tick_spacing: u16,
         update: &TickUpdate,
-        account_info: Option<&AccountInfo>,
     ) -> Result<bool> {
         if !self.check_in_array_bounds(tick_index, tick_spacing)
             || !Tick::check_is_usable_tick(tick_index, tick_spacing)
@@ -425,12 +424,6 @@ impl TickArrayType for DynamicTickArrayLoader {
 
         // If the tick needs to be initialized, we need to realloc and right-shift everything after byte_offset by DynamicTickData::LEN
         if !tick.initialized && update.initialized {
-            // Realloc to increase size by DynamicTickData::LEN (112 bytes) before writing
-            if let Some(account) = account_info {
-                let required_size = account.data_len() + DynamicTickData::LEN;
-                account.realloc(required_size, true)?;
-            }
-            
             let data_mut = self.tick_data_mut();
             let shift_data = &mut data_mut[byte_offset..];
             shift_data.rotate_right(DynamicTickData::LEN);
@@ -447,12 +440,6 @@ impl TickArrayType for DynamicTickArrayLoader {
 
             // sync bitmap
             self.update_tick_bitmap(tick_offset, false);
-            
-            // Realloc to decrease size by DynamicTickData::LEN (112 bytes) after shifting
-            if let Some(account) = account_info {
-                let required_size = account.data_len().saturating_sub(DynamicTickData::LEN);
-                account.realloc(required_size, true)?;
-            }
         }
 
         // Update the tick data at byte_offset
@@ -483,7 +470,7 @@ impl TickArrayType for DynamicTickArrayLoader {
             fee_growth_outside_1_x64: 0,
             reward_growths_outside: [0; REWARD_NUM],
         };
-        self.update_tick(tick_index, tick_spacing, &cleared_update, None)?;
+        self.update_tick(tick_index, tick_spacing, &cleared_update)?;
         Ok(())
     }
 }
@@ -594,7 +581,7 @@ mod tests {
             reward_growths_outside: [0; REWARD_NUM],
         };
 
-        loader.update_tick(0, 10, &update, None).unwrap();
+        loader.update_tick(0, 10, &update).unwrap();
 
         assert_eq!(loader.initialized_tick_count(), 1);
     }
@@ -614,7 +601,7 @@ mod tests {
             reward_growths_outside: [0; REWARD_NUM],
         };
 
-        loader.update_tick(0, 10, &init_update, None).unwrap();
+        loader.update_tick(0, 10, &init_update).unwrap();
         assert_eq!(loader.initialized_tick_count(), 1);
 
         let uninit_update = TickUpdate {
@@ -626,7 +613,7 @@ mod tests {
             reward_growths_outside: [0; REWARD_NUM],
         };
 
-        loader.update_tick(0, 10, &uninit_update, None).unwrap();
+        loader.update_tick(0, 10, &uninit_update).unwrap();
         assert_eq!(loader.initialized_tick_count(), 0);
     }
 
@@ -646,9 +633,9 @@ mod tests {
         };
     
         // Initialize 3 ticks: 0, 10, 20
-        loader.update_tick(0, 10, &init_update, None).unwrap();
-        loader.update_tick(10, 10, &init_update, None).unwrap();
-        loader.update_tick(20, 10, &init_update, None).unwrap();
+        loader.update_tick(0, 10, &init_update).unwrap();
+        loader.update_tick(10, 10, &init_update).unwrap();
+        loader.update_tick(20, 10, &init_update).unwrap();
     
         assert_eq!(loader.initialized_tick_count(), 3);
     }
@@ -668,7 +655,7 @@ mod tests {
             reward_growths_outside: [0; REWARD_NUM],
         };
 
-        let flipped = loader.update_tick(0, 10, &update, None).unwrap();
+        let flipped = loader.update_tick(0, 10, &update).unwrap();
         assert!(flipped);
     }
 
@@ -687,7 +674,7 @@ mod tests {
             reward_growths_outside: [0; REWARD_NUM],
         };
 
-        let flipped = loader.update_tick(0, 10, &update, None).unwrap();
+        let flipped = loader.update_tick(0, 10, &update).unwrap();
         assert!(flipped);
 
         let update2 = TickUpdate {
@@ -699,7 +686,7 @@ mod tests {
             reward_growths_outside: [0; REWARD_NUM],
         };
 
-        let flipped_2nd_time = loader.update_tick(0, 10, &update2, None).unwrap();
+        let flipped_2nd_time = loader.update_tick(0, 10, &update2).unwrap();
         assert!(!flipped_2nd_time); // Should not flip if tick is already initialized
     }
 
@@ -718,7 +705,7 @@ mod tests {
             reward_growths_outside: [333, 444, 555],
         };
 
-        loader.update_tick(0, 10, &update, None).unwrap();
+        loader.update_tick(0, 10, &update).unwrap();
 
         let tick = loader.get_tick(0, 10).unwrap();
 
@@ -753,9 +740,9 @@ mod tests {
         };
 
         // Initialize ticks at 0, 20, 40
-        loader.update_tick(0, 10, &update, None).unwrap();
-        loader.update_tick(20, 10, &update, None).unwrap();
-        loader.update_tick(40, 10, &update, None).unwrap();
+        loader.update_tick(0, 10, &update).unwrap();
+        loader.update_tick(20, 10, &update).unwrap();
+        loader.update_tick(40, 10, &update).unwrap();
 
         // Search right from tick 0 (a_to_b = false)
         let next = loader.get_next_init_tick_index(0, 10, false).unwrap();
@@ -794,7 +781,7 @@ mod tests {
             fee_growth_outside_1_x64: 0,
             reward_growths_outside: [0; REWARD_NUM],
         };
-        loader.update_tick(0, 10, &update, None).unwrap();
+        loader.update_tick(0, 10, &update).unwrap();
         assert_eq!(loader.initialized_tick_count(), 1);
 
         loader.clear_tick(0, 10).unwrap();
@@ -822,14 +809,14 @@ mod tests {
         };
 
         // Initialize tick at index 20 (offset 2)
-        loader.update_tick(20, 10, &init_update, None).unwrap();
+        loader.update_tick(20, 10, &init_update).unwrap();
 
         // Verify bit 2 is set (0b100 = 4)
         let bitmap = loader.tick_bitmap();
         assert_eq!(bitmap, 0b100);  // Only bit 2 should be set
 
         // Initialize tick at index 50 (offset 5)
-        loader.update_tick(50, 10, &init_update, None).unwrap();
+        loader.update_tick(50, 10, &init_update).unwrap();
 
         // Verify bits 2 and 5 are set (0b100100 = 36)
         let bitmap = loader.tick_bitmap();
@@ -852,8 +839,8 @@ mod tests {
         };
 
         // Initialize ticks at 20 (offset 2) and 50 (offset 5)
-        loader.update_tick(20, 10, &init_update, None).unwrap();
-        loader.update_tick(50, 10, &init_update, None).unwrap();
+        loader.update_tick(20, 10, &init_update).unwrap();
+        loader.update_tick(50, 10, &init_update).unwrap();
         assert_eq!(loader.tick_bitmap(), 0b100100);  // bits 2 and 5
 
         // Uninitialize tick 20 (offset 2)
@@ -865,14 +852,14 @@ mod tests {
             fee_growth_outside_1_x64: 0,
             reward_growths_outside: [0; REWARD_NUM],
         };
-        loader.update_tick(20, 10, &uninit_update, None).unwrap();
+        loader.update_tick(20, 10, &uninit_update).unwrap();
 
         // Verify only bit 5 remains (0b100000 = 32)
         let bitmap = loader.tick_bitmap();
         assert_eq!(bitmap, 0b100000);
 
         // Uninitialize tick 50 (offset 5)
-        loader.update_tick(50, 10, &uninit_update, None).unwrap();
+        loader.update_tick(50, 10, &uninit_update).unwrap();
 
         // Verify all bits cleared
         let bitmap = loader.tick_bitmap();
@@ -894,7 +881,7 @@ mod tests {
             fee_growth_outside_1_x64: 4003,
             reward_growths_outside: [4004, 4005, 4006],
         };
-        loader.update_tick(40, 10, &update_40, None).unwrap();
+        loader.update_tick(40, 10, &update_40).unwrap();
 
         // Initialize tick 60 with unique data
         let update_60 = TickUpdate {
@@ -905,7 +892,7 @@ mod tests {
             fee_growth_outside_1_x64: 6003,
             reward_growths_outside: [6004, 6005, 6006],
         };
-        loader.update_tick(60, 10, &update_60, None).unwrap();
+        loader.update_tick(60, 10, &update_60).unwrap();
 
         // Now initialize tick 50 IN THE MIDDLE - this causes tick 60's data to shift right
         let update_50 = TickUpdate {
@@ -916,7 +903,7 @@ mod tests {
             fee_growth_outside_1_x64: 5003,
             reward_growths_outside: [5004, 5005, 5006],
         };
-        loader.update_tick(50, 10, &update_50, None).unwrap();
+        loader.update_tick(50, 10, &update_50).unwrap();
 
         // Verify tick 40 data is still intact (copy to local vars for packed struct)
         let tick_40 = loader.get_tick(40, 10).unwrap();
@@ -967,7 +954,7 @@ mod tests {
             fee_growth_outside_1_x64: 4003,
             reward_growths_outside: [4004, 4005, 4006],
         };
-        loader.update_tick(40, 10, &update_40, None).unwrap();
+        loader.update_tick(40, 10, &update_40).unwrap();
 
         let update_50 = TickUpdate {
             initialized: true,
@@ -977,7 +964,7 @@ mod tests {
             fee_growth_outside_1_x64: 5003,
             reward_growths_outside: [5004, 5005, 5006],
         };
-        loader.update_tick(50, 10, &update_50, None).unwrap();
+        loader.update_tick(50, 10, &update_50).unwrap();
 
         let update_60 = TickUpdate {
             initialized: true,
@@ -987,7 +974,7 @@ mod tests {
             fee_growth_outside_1_x64: 6003,
             reward_growths_outside: [6004, 6005, 6006],
         };
-        loader.update_tick(60, 10, &update_60, None).unwrap();
+        loader.update_tick(60, 10, &update_60).unwrap();
 
         assert_eq!(loader.initialized_tick_count(), 3);
 
@@ -1000,7 +987,7 @@ mod tests {
             fee_growth_outside_1_x64: 0,
             reward_growths_outside: [0; REWARD_NUM],
         };
-        loader.update_tick(50, 10, &uninit_update, None).unwrap();
+        loader.update_tick(50, 10, &uninit_update).unwrap();
 
         assert_eq!(loader.initialized_tick_count(), 2);
 
@@ -1054,14 +1041,14 @@ mod tests {
             fee_growth_outside_1_x64: 0,
             reward_growths_outside: [0; REWARD_NUM],
         };
-        loader.update_tick(-600, 10, &update, None).unwrap();
+        loader.update_tick(-600, 10, &update).unwrap();
 
         // Initialize tick at -500 (offset 10)
-        loader.update_tick(-500, 10, &update, None).unwrap();
+        loader.update_tick(-500, 10, &update).unwrap();
 
         // Initialize tick at -10 (offset 59, last tick in array)
         // -600 + (59 * 10) = -600 + 590 = -10
-        loader.update_tick(-10, 10, &update, None).unwrap();
+        loader.update_tick(-10, 10, &update).unwrap();
 
         assert_eq!(loader.initialized_tick_count(), 3);
 
@@ -1101,11 +1088,11 @@ mod tests {
         };
 
         // First tick in array: offset 0
-        loader.update_tick(0, 10, &update, None).unwrap();
+        loader.update_tick(0, 10, &update).unwrap();
         
         // Last tick in array: offset 59 (TICK_ARRAY_SIZE - 1)
         // tick_index = start_tick_index + (offset * tick_spacing) = 0 + (59 * 10) = 590
-        loader.update_tick(590, 10, &update, None).unwrap();
+        loader.update_tick(590, 10, &update).unwrap();
 
         assert_eq!(loader.initialized_tick_count(), 2);
 
