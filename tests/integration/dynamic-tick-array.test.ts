@@ -12,7 +12,8 @@ import {
 } from "../helpers/init-utils";
 import { getTickArrayStartIndex, PROGRAM_ID } from "../helpers/constants";
 import { getTickArrayPda } from "../helpers/pda";
-import { Keypair, PublicKey, SystemProgram, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
+import { ProgramTestContext } from "solana-bankrun";
 import BN from "bn.js";
 
 /**
@@ -907,9 +908,33 @@ function readBitmapFromAccount(data: Uint8Array, offset: number, len: number): b
 // Anchor discriminator: sha256("account:TickArrayState")[0..8]
 const FIXED_TICK_ARRAY_DISCRIMINATOR = Buffer.from([192, 155, 85, 205, 49, 249, 129, 42]);
 
-// TickState::LEN = 168, TICK_ARRAY_SIZE = 60
-// FixedTickArray::LEN = 8 (disc) + 32 (pool_id) + 4 (start_tick_index) + 168*60 (ticks) + 1 (init_count) + 115 (epoch+padding) = 10240
-const FIXED_TICK_ARRAY_LEN = 10240;
+// TickArrayState (FixedTickArray) layout — cross-referenced with:
+//   programs/clmm/src/states/fixed_tick_array.rs
+//   pub const LEN: usize = 8 + 32 + 4 + TickState::LEN * TICK_ARRAY_SIZE_USIZE + 1 + 115;
+//
+// Field breakdown:
+//   discriminator:          8  bytes  (Anchor account discriminator)
+//   pool_id:               32  bytes  (Pubkey)
+//   start_tick_index:       4  bytes  (i32)
+//   ticks [TickState; 60]: 10080 bytes (168 * 60 = 10080)
+//   initialized_tick_count: 1  byte   (u8)
+//   recent_epoch + padding:115  bytes  (u64 + [u8; 107])
+//                         ──────────
+//   TOTAL:              10240  bytes
+//
+// ⚠️  If TickArrayState or TickState fields are ever added/removed in Rust,
+//    update this constant AND the layout comment above. Mismatch will cause
+//    load_tick_array_mut to read garbage from misaligned offsets.
+const FIXED_TICK_ARRAY_LEN = 8 + 32 + 4 + 168 * 60 + 1 + 115; // = 10240
+
+// Compile-time sanity check — if arithmetic above is wrong, this assertion
+// fires immediately when the test file is loaded, before any test runs.
+if (FIXED_TICK_ARRAY_LEN !== 10240) {
+  throw new Error(
+    `FIXED_TICK_ARRAY_LEN computed as ${FIXED_TICK_ARRAY_LEN}, expected 10240. ` +
+    `Check TickArrayState layout in fixed_tick_array.rs.`
+  );
+}
 
 /**
  * Pre-create a fixed tick array account at the correct PDA.
@@ -921,12 +946,15 @@ const FIXED_TICK_ARRAY_LEN = 10240;
  *   initialized_tick_count:  u8      (1 byte)    offset 10124
  *   recent_epoch:            u64     (8 bytes)   offset 10125
  *   padding:                 [u8; 107]           offset 10133
+ *
+ * Uses the bankrun rent sysvar to compute the exact rent-exempt minimum
+ * rather than a hardcoded approximation.
  */
-function preCreateFixedTickArray(
-  context: any,
+async function preCreateFixedTickArray(
+  context: ProgramTestContext,
   poolPda: PublicKey,
   startTickIndex: number,
-) {
+): Promise<PublicKey> {
   const pda = getTickArrayPda(poolPda, startTickIndex);
   const data = Buffer.alloc(FIXED_TICK_ARRAY_LEN);
 
@@ -942,10 +970,11 @@ function preCreateFixedTickArray(
   // Everything else (ticks, init_count, padding) stays zeroed — correct for
   // uninitialized ticks (liquidity_gross=0, not initialized).
 
-  // Calculate rent-exempt minimum
-  // Approximate: Solana rent = 19.055441478439427 lamports/byte/year × 2 years
-  // For 10240 bytes ≈ 0.073 SOL. We set generously to be safe.
-  const lamports = 2 * LAMPORTS_PER_SOL; // more than enough
+  // Compute rent-exempt minimum from the actual bankrun rent sysvar,
+  // not a hardcoded approximation — ensures the account is always valid
+  // regardless of cluster rent configuration.
+  const rent = await context.banksClient.getRent();
+  const lamports = Number(rent.minimumBalance(BigInt(FIXED_TICK_ARRAY_LEN)));
 
   context.setAccount(pda, {
     lamports,
@@ -991,7 +1020,7 @@ describe("fixed tick array — parity regression", () => {
     // Both ticks are in the same array (start=0)
     expect(lowerStart).toBe(upperStart);
 
-    const fixedPda = preCreateFixedTickArray(context, pool.poolPda, lowerStart);
+    const fixedPda = await preCreateFixedTickArray(context, pool.poolPda, lowerStart);
 
     // Capture state before openPosition
     const beforeAccount = await context.banksClient.getAccount(fixedPda);
@@ -1080,7 +1109,7 @@ describe("fixed tick array — parity regression", () => {
 
     // Pre-create FIXED tick array
     const lowerStart = getTickArrayStartIndex(tickLower, tickSpacing);
-    const fixedPda = preCreateFixedTickArray(context, pool.poolPda, lowerStart);
+    const fixedPda = await preCreateFixedTickArray(context, pool.poolPda, lowerStart);
 
     // Capture state before any operations
     const beforeAny = await context.banksClient.getAccount(fixedPda);
@@ -1243,7 +1272,7 @@ describe("fixed tick array — parity regression", () => {
 
     // Pre-create FIXED tick array
     const lowerStart = getTickArrayStartIndex(tickLower, tickSpacing);
-    const fixedPda = preCreateFixedTickArray(context, pool.poolPda, lowerStart);
+    const fixedPda = await preCreateFixedTickArray(context, pool.poolPda, lowerStart);
 
     const position = await openPosition(
       context,
@@ -1353,8 +1382,8 @@ describe("fixed tick array — parity regression", () => {
     expect(lowerStart).not.toBe(upperStart);
 
     // Pre-create BOTH as fixed tick arrays
-    const lowerPda = preCreateFixedTickArray(context, pool.poolPda, lowerStart);
-    const upperPda = preCreateFixedTickArray(context, pool.poolPda, upperStart);
+    const lowerPda = await preCreateFixedTickArray(context, pool.poolPda, lowerStart);
+    const upperPda = await preCreateFixedTickArray(context, pool.poolPda, upperStart);
     expect(lowerPda.equals(upperPda)).toBe(false);
 
     // Capture initial state for both
