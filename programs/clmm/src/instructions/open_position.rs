@@ -324,6 +324,7 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
             clock.unix_timestamp as u64
         )?
     }; // Drop mutable borrows here
+    drop(tick_arrays); // Release RefMut so realloc and re-load can access the account
 
     // Handle realloc for dynamic tick arrays
     // Grow: transfer rent first, then realloc

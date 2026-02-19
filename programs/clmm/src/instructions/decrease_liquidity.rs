@@ -321,7 +321,8 @@ pub fn burn_liquidity<'c: 'info, 'info>(
             clock.unix_timestamp as u64,
         )?
     }; // Drop mutable borrows here
-    
+    drop(tick_arrays); // Release RefMut so realloc and re-load can access the account
+
     // Realloc for dynamic tick arrays (shrink only, no rent refund)
     if is_same_array {
         let mut delta: i64 = 0;
