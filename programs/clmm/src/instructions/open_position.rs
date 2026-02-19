@@ -353,7 +353,8 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
                     diff,
                 )?;
             }
-            tick_array_lower_info.realloc(new_size, true)?;
+            // zero_init=false: rotate_right already wrote tick data into these bytes
+            tick_array_lower_info.realloc(new_size, false)?;
         } else if delta < 0 {
             let new_size = (tick_array_lower_info.data_len() as i64 + delta) as usize;
             tick_array_lower_info.realloc(new_size, true)?;
@@ -377,7 +378,8 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
                     diff,
                 )?;
             }
-            tick_array_lower_info.realloc(new_size, true)?;
+            // zero_init=false: rotate_right already wrote tick data into these bytes
+            tick_array_lower_info.realloc(new_size, false)?;
         }
         if result.tick_array_realloc.lower_shrink {
             tick_array_lower_info.realloc(
@@ -402,7 +404,8 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
                     diff,
                 )?;
             }
-            tick_array_upper_info.realloc(new_size, true)?;
+            // zero_init=false: rotate_right already wrote tick data into these bytes
+            tick_array_upper_info.realloc(new_size, false)?;
         }
         if result.tick_array_realloc.upper_shrink {
             tick_array_upper_info.realloc(
