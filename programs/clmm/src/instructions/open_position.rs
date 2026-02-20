@@ -326,9 +326,8 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     }; // Drop mutable borrows here
     drop(tick_arrays); // Release RefMut so realloc and re-load can access the account
 
-    // Handle realloc for dynamic tick arrays
-    // Grow: transfer rent first, then realloc
-    // Shrink: just realloc, no rent transfer
+    // Handle realloc for dynamic tick arrays (grow only)
+    // Transfer rent first, then realloc
     if is_same_array {
         // Both ticks in same account — combine deltas into one realloc
         // add_liquidity only grows — shrink is impossible (liquidity always increases)
