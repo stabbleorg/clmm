@@ -331,13 +331,12 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     // Shrink: just realloc, no rent transfer
     if is_same_array {
         // Both ticks in same account — combine deltas into one realloc
-        let mut delta: i64 = 0;
-        if result.tick_array_realloc.lower_grow { delta += DynamicTickData::LEN as i64; }
-        if result.tick_array_realloc.lower_shrink { delta -= DynamicTickData::LEN as i64; }
-        if result.tick_array_realloc.upper_grow { delta += DynamicTickData::LEN as i64; }
-        if result.tick_array_realloc.upper_shrink { delta -= DynamicTickData::LEN as i64; }
+        // add_liquidity only grows — shrink is impossible (liquidity always increases)
+        let mut delta: usize = 0;
+        if result.tick_array_realloc.lower_grow { delta += DynamicTickData::LEN; }
+        if result.tick_array_realloc.upper_grow { delta += DynamicTickData::LEN; }
         if delta > 0 {
-            let new_size = (tick_array_lower_info.data_len() as i64 + delta) as usize;
+            let new_size = tick_array_lower_info.data_len() + delta;
             let required_lamports = Rent::get()?.minimum_balance(new_size);
             let current_lamports = tick_array_lower_info.lamports();
             if required_lamports > current_lamports {
@@ -355,9 +354,6 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
             }
             // zero_init=false: rotate_right already wrote tick data into these bytes
             tick_array_lower_info.realloc(new_size, false)?;
-        } else if delta < 0 {
-            let new_size = (tick_array_lower_info.data_len() as i64 + delta) as usize;
-            tick_array_lower_info.realloc(new_size, true)?;
         }
     } else {
         // Different accounts — handle lower and upper independently
@@ -381,12 +377,6 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
             // zero_init=false: rotate_right already wrote tick data into these bytes
             tick_array_lower_info.realloc(new_size, false)?;
         }
-        if result.tick_array_realloc.lower_shrink {
-            tick_array_lower_info.realloc(
-                tick_array_lower_info.data_len() - DynamicTickData::LEN,
-                true,
-            )?;
-        }
         if result.tick_array_realloc.upper_grow {
             let new_size = tick_array_upper_info.data_len() + DynamicTickData::LEN;
             let required_lamports = Rent::get()?.minimum_balance(new_size);
@@ -406,12 +396,6 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
             }
             // zero_init=false: rotate_right already wrote tick data into these bytes
             tick_array_upper_info.realloc(new_size, false)?;
-        }
-        if result.tick_array_realloc.upper_shrink {
-            tick_array_upper_info.realloc(
-                tick_array_upper_info.data_len() - DynamicTickData::LEN,
-                true,
-            )?;
         }
     }
 
