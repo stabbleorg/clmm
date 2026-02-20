@@ -2371,4 +2371,183 @@ describe("edge cases — pre-audit coverage", () => {
     expect(posAFinal).not.toBeNull();
     expect(posBFinal).not.toBeNull();
   });
+
+  /**
+   * HYBRID: FIXED LOWER + DYNAMIC UPPER — the architectural seam
+   *
+   * tickLower=-100, tickUpper=100, tickSpacing=10
+   * Lower tick (-100) → array@-600 → PRE-CREATED as FIXED (TickArrayState, 10240 bytes)
+   * Upper tick (100)  → array@0    → NOT pre-created → DYNAMIC (created on-demand)
+   *
+   * This is the most dangerous path in the hybrid architecture because the
+   * SAME openPosition instruction receives TWO tick array accounts of
+   * DIFFERENT types. The program must:
+   *   - Detect lower is fixed (is_variable_size()=false) → skip realloc
+   *   - Detect upper is dynamic (is_variable_size()=true) → grow +112
+   *   - NOT accidentally realloc the fixed array
+   *   - NOT send rent lamports to the fixed array
+   *   - NOT corrupt the fixed array discriminator
+   *
+   * Full cycle: open → decrease to zero
+   *
+   * On open:
+   *   lower (fixed):   no realloc, size stays 10240, lamports unchanged
+   *   upper (dynamic):  grow +112, size = MIN_LEN + 112 = 232
+   *
+   * On decrease (all liquidity):
+   *   lower (fixed):   no realloc, size stays 10240, lamports unchanged
+   *   upper (dynamic):  shrink -112, size = MIN_LEN = 120, bitmap zeroed
+   *
+   * What a regression would look like:
+   *   a) Realloc fires on fixed array → account grows beyond 10240 → layout
+   *      corrupted, all future reads of tick slots at fixed offsets are wrong
+   *   b) Rent transfer targets fixed array → lamports change → accounting error
+   *   c) Fixed discriminator overwritten → program misidentifies the array type
+   *      on next access → catastrophic type confusion
+   *   d) Dynamic array not grown → tick 100 not initialized → swap skips it
+   */
+  it("hybrid: fixed lower + dynamic upper, full cycle (open → decrease)", async () => {
+    const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(10);
+
+    const tickLower = -100;
+    const tickUpper = 100;
+    const tickSpacing = 10;
+
+    // Different arrays
+    const lowerStart = getTickArrayStartIndex(tickLower, tickSpacing); // -600
+    const upperStart = getTickArrayStartIndex(tickUpper, tickSpacing); // 0
+    expect(lowerStart).toBe(-600);
+    expect(upperStart).toBe(0);
+    expect(lowerStart).not.toBe(upperStart);
+
+    // Pre-create FIXED tick array for the LOWER tick only
+    const fixedLowerPda = await preCreateFixedTickArray(context, pool.poolPda, lowerStart);
+
+    // Capture fixed array state before open
+    const fixedBefore = await context.banksClient.getAccount(fixedLowerPda);
+    expect(fixedBefore).not.toBeNull();
+    expect(fixedBefore!.data.length).toBe(FIXED_TICK_ARRAY_LEN); // 10240
+    const fixedLamportsBefore = Number(fixedBefore!.lamports);
+    const fixedDiscBefore = Buffer.from(fixedBefore!.data.subarray(0, 8));
+    expect(fixedDiscBefore.equals(FIXED_TICK_ARRAY_DISCRIMINATOR)).toBe(true);
+
+    // Upper tick array does NOT exist yet — will be created as dynamic
+    const upperPda = getTickArrayPda(pool.poolPda, upperStart);
+    const upperBefore = await context.banksClient.getAccount(upperPda);
+    expect(upperBefore).toBeNull(); // does not exist yet
+
+    // ═══════════════════════════════════════════════════════════
+    // PHASE 1: OPEN — fixed lower (no realloc) + dynamic upper (grow +112)
+    // ═══════════════════════════════════════════════════════════
+    const liquidity = new BN(1_000_000);
+    const position = await openPosition(
+      context,
+      pool.poolPda,
+      mint0,
+      mint1,
+      pool.vault0,
+      pool.vault1,
+      userAta0,
+      userAta1,
+      tickLower,
+      tickUpper,
+      tickSpacing,
+      liquidity,
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // Different PDAs
+    expect(position.tickArrayLower.equals(position.tickArrayUpper)).toBe(false);
+    expect(position.tickArrayLower.equals(fixedLowerPda)).toBe(true);
+
+    // --- FIXED LOWER: must be completely untouched ---
+    const fixedAfterOpen = await context.banksClient.getAccount(fixedLowerPda);
+    expect(fixedAfterOpen).not.toBeNull();
+
+    // 1) Size unchanged — no realloc on fixed array
+    expect(fixedAfterOpen!.data.length).toBe(FIXED_TICK_ARRAY_LEN); // still 10240
+
+    // 2) Lamports unchanged — no rent transfer to fixed array
+    expect(Number(fixedAfterOpen!.lamports)).toBe(fixedLamportsBefore);
+
+    // 3) Discriminator still FixedTickArray — not corrupted
+    const fixedDiscAfterOpen = Buffer.from(fixedAfterOpen!.data.subarray(0, 8));
+    expect(fixedDiscAfterOpen.equals(FIXED_TICK_ARRAY_DISCRIMINATOR)).toBe(true);
+
+    // --- DYNAMIC UPPER: grew by +112 ---
+    const dynamicAfterOpen = await context.banksClient.getAccount(position.tickArrayUpper);
+    expect(dynamicAfterOpen).not.toBeNull();
+
+    // 4) Dynamic array size = MIN_LEN + 112 (one tick initialized)
+    expect(dynamicAfterOpen!.data.length).toBe(MIN_LEN + DYNAMIC_TICK_DATA_LEN); // 232
+
+    // 5) Dynamic bitmap: tick 100 → offset (100-0)/10 = 10 → bit 10
+    const dynamicBitmapOpen = readBitmapFromAccount(dynamicAfterOpen!.data, BITMAP_OFFSET, BITMAP_LEN);
+    expect(dynamicBitmapOpen).toBe(1n << 10n);
+
+    // 6) Dynamic array rent-exempt
+    const rent = await context.banksClient.getRent();
+    const minRentDynamic = rent.minimumBalance(BigInt(dynamicAfterOpen!.data.length));
+    expect(dynamicAfterOpen!.lamports).toBeGreaterThanOrEqual(minRentDynamic);
+
+    // 7) Position exists
+    const posAfterOpen = await context.banksClient.getAccount(position.personalPosition);
+    expect(posAfterOpen).not.toBeNull();
+
+    // ═══════════════════════════════════════════════════════════
+    // PHASE 2: DECREASE ALL — fixed (no shrink) + dynamic (shrink -112)
+    // ═══════════════════════════════════════════════════════════
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      position.positionNftMint,
+      position.positionNftAccount,
+      position.personalPosition,
+      position.tickArrayLower,
+      position.tickArrayUpper,
+      mint0,
+      mint1,
+      pool.vault0,
+      pool.vault1,
+      userAta0,
+      userAta1,
+      liquidity,
+      new BN(0),
+      new BN(0),
+    );
+
+    // --- FIXED LOWER: still completely untouched ---
+    const fixedAfterDecrease = await context.banksClient.getAccount(fixedLowerPda);
+    expect(fixedAfterDecrease).not.toBeNull();
+
+    // 8) Size still 10240
+    expect(fixedAfterDecrease!.data.length).toBe(FIXED_TICK_ARRAY_LEN);
+
+    // 9) Lamports still unchanged
+    expect(Number(fixedAfterDecrease!.lamports)).toBe(fixedLamportsBefore);
+
+    // 10) Discriminator still FixedTickArray
+    const fixedDiscAfterDecrease = Buffer.from(fixedAfterDecrease!.data.subarray(0, 8));
+    expect(fixedDiscAfterDecrease.equals(FIXED_TICK_ARRAY_DISCRIMINATOR)).toBe(true);
+
+    // --- DYNAMIC UPPER: shrunk back to MIN_LEN ---
+    const dynamicAfterDecrease = await context.banksClient.getAccount(position.tickArrayUpper);
+    expect(dynamicAfterDecrease).not.toBeNull();
+
+    // 11) Dynamic array back to MIN_LEN
+    expect(dynamicAfterDecrease!.data.length).toBe(MIN_LEN); // 120
+
+    // 12) Dynamic bitmap zeroed
+    const dynamicBitmapDecrease = readBitmapFromAccount(dynamicAfterDecrease!.data, BITMAP_OFFSET, BITMAP_LEN);
+    expect(dynamicBitmapDecrease).toBe(0n);
+
+    // 13) Dynamic array still rent-exempt after shrink
+    const minRentShrunk = rent.minimumBalance(BigInt(MIN_LEN));
+    expect(dynamicAfterDecrease!.lamports).toBeGreaterThanOrEqual(minRentShrunk);
+
+    // 14) Position still exists
+    const posAfterDecrease = await context.banksClient.getAccount(position.personalPosition);
+    expect(posAfterDecrease).not.toBeNull();
+  });
 });
