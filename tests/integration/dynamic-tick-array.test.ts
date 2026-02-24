@@ -385,6 +385,96 @@ describe("dynamic tick array — realloc fix", () => {
   });
 
   /**
+   * PARTIAL DECREASE — pool bitmap stays ON when ticks remain initialized
+   *
+   * Opens a position with 1,000,000 liquidity, then removes only half.
+   * Ticks are NOT deinitialized (liquidity_gross > 0), so:
+   *   - No shrink realloc
+   *   - Local bitmap unchanged (both tick bits stay set)
+   *   - Pool bitmap unchanged (array still has ticks, bit stays ON)
+   *
+   * This tests the `lower_count_before > 0 && after_count == 0` guard
+   * in decrease_liquidity — after_count is NOT 0, so no flip fires.
+   */
+  it("partial decrease: pool bitmap stays ON when ticks remain initialized", async () => {
+    const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(10);
+
+    const tickSpacing = 10;
+
+    // Helper: read pool-level tick_array_bitmap
+    const POOL_BITMAP_OFFSET = 904;
+    const POOL_BITMAP_LEN = 128;
+    async function readPoolBitmap(): Promise<bigint> {
+      const poolAccount = await context.banksClient.getAccount(pool.poolPda);
+      const data = poolAccount!.data;
+      let value = 0n;
+      for (let i = 0; i < POOL_BITMAP_LEN; i++) {
+        value |= BigInt(data[POOL_BITMAP_OFFSET + i]) << BigInt(i * 8);
+      }
+      return value;
+    }
+
+    // Open position with 1,000,000 liquidity
+    const position = await openPosition(
+      context,
+      pool.poolPda,
+      mint0,
+      mint1,
+      pool.vault0,
+      pool.vault1,
+      userAta0,
+      userAta1,
+      100,
+      200,
+      tickSpacing,
+      new BN(1_000_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // After open: pool bitmap is set, array has 2 ticks
+    const poolBitmapAfterOpen = await readPoolBitmap();
+    expect(poolBitmapAfterOpen).not.toBe(0n);
+
+    const arrayAfterOpen = await context.banksClient.getAccount(position.tickArrayLower);
+    expect(arrayAfterOpen!.data.length).toBe(MIN_LEN + 2 * DYNAMIC_TICK_DATA_LEN);
+    const localBitmapAfterOpen = readBitmapFromAccount(arrayAfterOpen!.data, BITMAP_OFFSET, BITMAP_LEN);
+    expect(localBitmapAfterOpen).not.toBe(0n);
+
+    // Partial decrease: remove only half the liquidity
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      position.positionNftMint,
+      position.positionNftAccount,
+      position.personalPosition,
+      position.tickArrayLower,
+      position.tickArrayUpper,
+      mint0,
+      mint1,
+      pool.vault0,
+      pool.vault1,
+      userAta0,
+      userAta1,
+      new BN(500_000), // half liquidity
+      new BN(0),
+      new BN(0),
+    );
+
+    // 1) Array size UNCHANGED — no shrink (ticks still initialized)
+    const arrayAfterDecrease = await context.banksClient.getAccount(position.tickArrayLower);
+    expect(arrayAfterDecrease!.data.length).toBe(MIN_LEN + 2 * DYNAMIC_TICK_DATA_LEN);
+
+    // 2) Local bitmap UNCHANGED — both tick bits still set
+    const localBitmapAfterDecrease = readBitmapFromAccount(arrayAfterDecrease!.data, BITMAP_OFFSET, BITMAP_LEN);
+    expect(localBitmapAfterDecrease).toBe(localBitmapAfterOpen);
+
+    // 3) Pool bitmap UNCHANGED — array still has ticks, no flip
+    const poolBitmapAfterDecrease = await readPoolBitmap();
+    expect(poolBitmapAfterDecrease).toBe(poolBitmapAfterOpen);
+  });
+
+  /**
    * DECREASE LIQUIDITY — DIFFERENT ARRAYS TEST
    * tickLower=-100, tickUpper=100, tickSpacing=10
    * Lower lands in array at -600, upper lands in array at 0 — two separate PDAs.
@@ -1535,6 +1625,88 @@ describe("fixed tick array — parity regression", () => {
   });
 
   /**
+   * FIXED SAME-ARRAY — pool bitmap verification through full cycle
+   *
+   * Both ticks (100, 200) land in fixed array [0, 600).
+   * Verifies pool-level tick_array_bitmap is correctly managed
+   * by the stored counter (update_initialized_tick_count) path:
+   *   - After open: bit set (counter went 0→1 on first tick)
+   *   - After full decrease: bit cleared (counter went 1→0 on last tick)
+   */
+  it("fixed same-array: pool bitmap set on open, cleared on full decrease", async () => {
+    const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(10);
+
+    const tickSpacing = 10;
+
+    // Helper: read pool-level tick_array_bitmap
+    const POOL_BITMAP_OFFSET = 904;
+    const POOL_BITMAP_LEN = 128;
+    async function readPoolBitmap(): Promise<bigint> {
+      const poolAccount = await context.banksClient.getAccount(pool.poolPda);
+      const data = poolAccount!.data;
+      let value = 0n;
+      for (let i = 0; i < POOL_BITMAP_LEN; i++) {
+        value |= BigInt(data[POOL_BITMAP_OFFSET + i]) << BigInt(i * 8);
+      }
+      return value;
+    }
+
+    // Pre-create fixed tick array
+    const lowerStart = getTickArrayStartIndex(100, tickSpacing);
+    expect(lowerStart).toBe(0);
+    const fixedPda = await preCreateFixedTickArray(context, pool.poolPda, lowerStart);
+
+    // Sanity: pool bitmap starts at zero
+    expect(await readPoolBitmap()).toBe(0n);
+
+    // Open position — both ticks in same fixed array
+    const position = await openPosition(
+      context,
+      pool.poolPda,
+      mint0,
+      mint1,
+      pool.vault0,
+      pool.vault1,
+      userAta0,
+      userAta1,
+      100,
+      200,
+      tickSpacing,
+      new BN(1_000_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // Pool bitmap: bit for array [0, 600) should be SET
+    const poolBitmapAfterOpen = await readPoolBitmap();
+    expect(poolBitmapAfterOpen).not.toBe(0n);
+
+    // Decrease ALL liquidity
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      position.positionNftMint,
+      position.positionNftAccount,
+      position.personalPosition,
+      position.tickArrayLower,
+      position.tickArrayUpper,
+      mint0,
+      mint1,
+      pool.vault0,
+      pool.vault1,
+      userAta0,
+      userAta1,
+      new BN(1_000_000),
+      new BN(0),
+      new BN(0),
+    );
+
+    // Pool bitmap: bit for array [0, 600) should be CLEARED
+    const poolBitmapAfterDecrease = await readPoolBitmap();
+    expect(poolBitmapAfterDecrease).toBe(0n);
+  });
+
+  /**
    * DIFFERENT-ARRAY FIXED POSITIONS — full cycle: open → increase → decrease
    *
    * tickLower=-100, tickUpper=100, tickSpacing=10
@@ -2256,6 +2428,22 @@ describe("edge cases — pre-audit coverage", () => {
 
     const tickSpacing = 10;
 
+    // Helper: read pool-level tick_array_bitmap
+    const POOL_BITMAP_OFFSET = 904;
+    const POOL_BITMAP_LEN = 128;
+    async function readPoolBitmap(): Promise<bigint> {
+      const poolAccount = await context.banksClient.getAccount(pool.poolPda);
+      const data = poolAccount!.data;
+      let value = 0n;
+      for (let i = 0; i < POOL_BITMAP_LEN; i++) {
+        value |= BigInt(data[POOL_BITMAP_OFFSET + i]) << BigInt(i * 8);
+      }
+      return value;
+    }
+
+    // Sanity: pool bitmap starts at zero
+    expect(await readPoolBitmap()).toBe(0n);
+
     // ═══════════════════════════════════════════════════════════
     // SETUP: Open Position A at [100, 200] — initializes ticks 100 and 200
     // ═══════════════════════════════════════════════════════════
@@ -2293,6 +2481,10 @@ describe("edge cases — pre-audit coverage", () => {
 
     const lamportsAfterA = Number(afterA!.lamports);
 
+    // Pool bitmap: bit for array [0, 600) should be set (first ticks in this array)
+    const poolBitmapAfterA = await readPoolBitmap();
+    expect(poolBitmapAfterA).not.toBe(0n);
+
     // ═══════════════════════════════════════════════════════════
     // SUB-CASE A: Open Position B at EXACT SAME range [100, 200]
     // Both ticks already initialized → NO realloc
@@ -2327,7 +2519,11 @@ describe("edge cases — pre-audit coverage", () => {
     // 3) Lamports UNCHANGED — no rent transfer
     expect(Number(afterB!.lamports)).toBe(lamportsAfterA);
 
-    // 4) Both positions exist independently
+    // 4) Pool bitmap UNCHANGED — no new ticks initialized, no flip needed
+    const poolBitmapAfterB = await readPoolBitmap();
+    expect(poolBitmapAfterB).toBe(poolBitmapAfterA);
+
+    // 5) Both positions exist independently
     const posAAccount = await context.banksClient.getAccount(posA.personalPosition);
     const posBAccount = await context.banksClient.getAccount(posB.personalPosition);
     expect(posAAccount).not.toBeNull();
@@ -2371,7 +2567,12 @@ describe("edge cases — pre-audit coverage", () => {
     const expectedBitmapC = expectedBitmapA | (1n << 30n); // bits 10, 20, 30
     expect(bitmapC).toBe(expectedBitmapC);
 
-    // 7) Rent-exempt after partial grow
+    // 7) Pool bitmap UNCHANGED — array already had ticks, lower_count_before > 0
+    //    so no flip even though a new tick (300) was initialized
+    const poolBitmapAfterC = await readPoolBitmap();
+    expect(poolBitmapAfterC).toBe(poolBitmapAfterA);
+
+    // 8) Rent-exempt after partial grow
     const rent = await context.banksClient.getRent();
     const minRent = rent.minimumBalance(BigInt(sizeAfterC));
     expect(afterC!.lamports).toBeGreaterThanOrEqual(minRent);
