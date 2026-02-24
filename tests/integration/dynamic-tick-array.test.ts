@@ -971,38 +971,17 @@ describe("dynamic tick array — realloc fix", () => {
   });
 
   /**
-   * SWAP THROUGH AN EMPTIED TICK ARRAY — pool bitmap must be cleared
+   * SWAP THROUGH AN EMPTIED TICK ARRAY
    *
-   * *** THIS TEST EXPOSES TWO BUGS IN THE POOL-LEVEL TICK_ARRAY_BITMAP ***
-   *
-   * BUG 1 — open_position "ZERO-FLIP" (never sets pool bitmap bit):
-   *   When both ticks of a new position are in the SAME dynamic tick array,
-   *   modify_position initializes both ticks (setting their local bitmap bits).
-   *   After modify_position returns, open_position.rs checks:
-   *     if result.tick_lower_flipped {
-   *       let after_init_tick_count = tick_array.initialized_tick_count();
-   *       if after_init_tick_count == 1 { flip_tick_array_bit(...); }
-   *     }
-   *     if result.tick_upper_flipped {
-   *       let after_init_tick_count = tick_array.initialized_tick_count();
-   *       if after_init_tick_count == 1 { flip_tick_array_bit(...); }
-   *     }
-   *   But both ticks were already initialized by modify_position, so by the time
-   *   we check tick_lower_flipped, initialized_tick_count() returns 2 (not 1).
-   *   The guard `== 1` is FALSE for BOTH checks. flip_tick_array_bit is NEVER called.
-   *   → Pool bitmap bit stays 0. The array is invisible to swaps.
-   *
-   * BUG 2 — decrease_liquidity "DOUBLE-FLIP" (XOR cancels out):
-   *   When both ticks are de-initialized from the SAME array:
-   *     - tick_lower_flipped: initialized_tick_count()=0 → flip (XOR)
-   *     - tick_upper_flipped: initialized_tick_count()=0 → flip AGAIN (XOR undoes it!)
-   *   If bug 1 is NOT fixed (bit was 0): double-flip makes 0→1→0.
-   *   If bug 1 IS fixed (bit was 1): double-flip makes 1→0→1 (BIT STUCK ON).
-   *
-   * Net effect: pool bitmap is permanently 0 for same-array dynamic positions,
-   * making them invisible to the swap router — causing InsufficientLiquidityForDirection.
+   * This test verifies that the pool-level tick_array_bitmap is correctly updated
+   * for dynamic tick arrays. It does the following:
+   * 1. Opens a position where both ticks are in the same dynamic array (pool bit ON).
+   * 2. Removes all liquidity from that position (pool bit OFF).
+   * 3. Opens another position to provide liquidity elsewhere.
+   * 4. Swaps through the emptied array to ensure it doesn't fail with
+   *    InsufficientLiquidityForDirection due to an incorrectly set pool bitmap.
    */
-  it("should swap through an emptied tick array without LiquidityInsufficient (Issue 9)", async () => {
+  it("should swap through an emptied tick array without LiquidityInsufficient", async () => {
     const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(10);
 
     const tickSpacing = 10;
