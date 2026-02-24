@@ -9,9 +9,11 @@ import {
   openPosition,
   increaseLiquidity,
   decreaseLiquidity,
+
+  swapV2,
 } from "../helpers/init-utils";
 import { getTickArrayStartIndex, PROGRAM_ID } from "../helpers/constants";
-import { getTickArrayPda } from "../helpers/pda";
+import { getTickArrayPda, getTickArrayBitmapPda } from "../helpers/pda";
 import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import { ProgramTestContext } from "solana-bankrun";
 import BN from "bn.js";
@@ -876,6 +878,201 @@ describe("dynamic tick array — realloc fix", () => {
     // 4) Position account still exists
     const posAfterDecrease = await context.banksClient.getAccount(position.personalPosition);
     expect(posAfterDecrease).not.toBeNull();
+  });
+
+  /**
+   * SWAP THROUGH AN EMPTIED TICK ARRAY — pool bitmap must be cleared
+   *
+   * *** THIS TEST EXPOSES TWO BUGS IN THE POOL-LEVEL TICK_ARRAY_BITMAP ***
+   *
+   * BUG 1 — open_position "ZERO-FLIP" (never sets pool bitmap bit):
+   *   When both ticks of a new position are in the SAME dynamic tick array,
+   *   modify_position initializes both ticks (setting their local bitmap bits).
+   *   After modify_position returns, open_position.rs checks:
+   *     if result.tick_lower_flipped {
+   *       let after_init_tick_count = tick_array.initialized_tick_count();
+   *       if after_init_tick_count == 1 { flip_tick_array_bit(...); }
+   *     }
+   *     if result.tick_upper_flipped {
+   *       let after_init_tick_count = tick_array.initialized_tick_count();
+   *       if after_init_tick_count == 1 { flip_tick_array_bit(...); }
+   *     }
+   *   But both ticks were already initialized by modify_position, so by the time
+   *   we check tick_lower_flipped, initialized_tick_count() returns 2 (not 1).
+   *   The guard `== 1` is FALSE for BOTH checks. flip_tick_array_bit is NEVER called.
+   *   → Pool bitmap bit stays 0. The array is invisible to swaps.
+   *
+   * BUG 2 — decrease_liquidity "DOUBLE-FLIP" (XOR cancels out):
+   *   When both ticks are de-initialized from the SAME array:
+   *     - tick_lower_flipped: initialized_tick_count()=0 → flip (XOR)
+   *     - tick_upper_flipped: initialized_tick_count()=0 → flip AGAIN (XOR undoes it!)
+   *   If bug 1 is NOT fixed (bit was 0): double-flip makes 0→1→0.
+   *   If bug 1 IS fixed (bit was 1): double-flip makes 1→0→1 (BIT STUCK ON).
+   *
+   * Net effect: pool bitmap is permanently 0 for same-array dynamic positions,
+   * making them invisible to the swap router — causing InsufficientLiquidityForDirection.
+   */
+  it("should swap through an emptied tick array without LiquidityInsufficient (Issue 9)", async () => {
+    const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(10);
+
+    const tickSpacing = 10;
+
+    // ═══════════════════════════════════════════════════════════
+    // Helper: read the pool-level tick_array_bitmap (1024 bits = 128 bytes)
+    // from the pool account. Layout: 8-byte discriminator, then PoolState
+    // fields. tick_array_bitmap is at byte offset 904 from start of account.
+    // ═══════════════════════════════════════════════════════════
+    const POOL_BITMAP_OFFSET = 904;
+    const POOL_BITMAP_LEN = 128; // 16 × u64
+
+    async function readPoolBitmap(): Promise<bigint> {
+      const poolAccount = await context.banksClient.getAccount(pool.poolPda);
+      const data = poolAccount!.data;
+      let value = 0n;
+      for (let i = 0; i < POOL_BITMAP_LEN; i++) {
+        value |= BigInt(data[POOL_BITMAP_OFFSET + i]) << BigInt(i * 8);
+      }
+      return value;
+    }
+
+    // Sanity: pool bitmap starts at zero (no tick arrays initialized)
+    const bitmapInitial = await readPoolBitmap();
+    expect(bitmapInitial).toBe(0n);
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 1: Open position A in tick array [0, 600)
+    //         ticks at 100 and 200 — both in same array
+    // ═══════════════════════════════════════════════════════════
+    const posA = await openPosition(
+      context,
+      pool.poolPda,
+      mint0,
+      mint1,
+      pool.vault0,
+      pool.vault1,
+      userAta0,
+      userAta1,
+      100,   // tickLower
+      200,   // tickUpper
+      tickSpacing,
+      new BN(1_000_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // Verify tick array [0, 600) has initialized ticks (local bitmap is correct)
+    const arrayAfterOpen = await context.banksClient.getAccount(posA.tickArrayLower);
+    expect(arrayAfterOpen).not.toBeNull();
+    expect(arrayAfterOpen!.data.length).toBe(MIN_LEN + 2 * DYNAMIC_TICK_DATA_LEN); // 344
+    const localBitmapAfterOpen = readBitmapFromAccount(arrayAfterOpen!.data, BITMAP_OFFSET, BITMAP_LEN);
+    expect(localBitmapAfterOpen).not.toBe(0n); // local bitmap IS correct
+
+    // BUG 1 FIXED: Pool bitmap is now correctly set after open_position
+    const poolBitmapAfterOpenA = await readPoolBitmap();
+    console.log("Pool bitmap after Open A:", poolBitmapAfterOpenA.toString(16));
+    expect(poolBitmapAfterOpenA).not.toBe(0n); // pool bit for array [0, 600) is set
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 2: Remove ALL liquidity from position A
+    //         → ticks deinitialized, array shrinks, pool bitmap bit CLEARED
+    // ═══════════════════════════════════════════════════════════
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      posA.positionNftMint,
+      posA.positionNftAccount,
+      posA.personalPosition,
+      posA.tickArrayLower,
+      posA.tickArrayUpper,
+      mint0,
+      mint1,
+      pool.vault0,
+      pool.vault1,
+      userAta0,
+      userAta1,
+      new BN(1_000_000), // remove all liquidity
+      new BN(0),
+      new BN(0),
+    );
+
+    // Verify: array [0, 600) is now empty (local state is correct)
+    const arrayAfterRemove = await context.banksClient.getAccount(posA.tickArrayLower);
+    expect(arrayAfterRemove).not.toBeNull();
+    expect(arrayAfterRemove!.data.length).toBe(MIN_LEN); // shrunk to minimum
+    const localBitmapAfterRemove = readBitmapFromAccount(arrayAfterRemove!.data, BITMAP_OFFSET, BITMAP_LEN);
+    expect(localBitmapAfterRemove).toBe(0n); // local bitmap IS correct
+
+    // BUG 2 FIXED: Pool bitmap correctly cleared after removing all liquidity
+    const poolBitmapAfterDecreaseA = await readPoolBitmap();
+    console.log("Pool bitmap after Decrease A:", poolBitmapAfterDecreaseA.toString(16));
+    expect(poolBitmapAfterDecreaseA).toBe(0n); // array is empty, bit is OFF
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 3: Open position B in tick array [-600, 0)
+    //         ticks at -200 and -100 — below current price (tick 0)
+    //         This gives the swap somewhere to land
+    // ═══════════════════════════════════════════════════════════
+    const posB = await openPosition(
+      context,
+      pool.poolPda,
+      mint0,
+      mint1,
+      pool.vault0,
+      pool.vault1,
+      userAta0,
+      userAta1,
+      -200,  // tickLower
+      -100,  // tickUpper
+      tickSpacing,
+      new BN(1_000_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // Sanity: position B is in tick array [-600, 0)
+    const lowerStartB = getTickArrayStartIndex(-200, tickSpacing);
+    expect(lowerStartB).toBe(-600);
+    const upperStartB = getTickArrayStartIndex(-100, tickSpacing);
+    expect(upperStartB).toBe(-600);
+
+    // Verify tick array [-600, 0) has initialized ticks (local bitmap is correct)
+    const arrayNeg600 = await context.banksClient.getAccount(posB.tickArrayLower);
+    expect(arrayNeg600).not.toBeNull();
+    expect(arrayNeg600!.data.length).toBe(MIN_LEN + 2 * DYNAMIC_TICK_DATA_LEN);
+    const localBitmapNeg600 = readBitmapFromAccount(arrayNeg600!.data, BITMAP_OFFSET, BITMAP_LEN);
+    expect(localBitmapNeg600).not.toBe(0n); // local bitmap IS correct
+
+    // BUG 1 FIXED: Pool bitmap now has bit for array [-600, 0) set
+    const poolBitmapAfterOpenB = await readPoolBitmap();
+    console.log("Pool bitmap after Open B:", poolBitmapAfterOpenB.toString(16));
+    expect(poolBitmapAfterOpenB).not.toBe(0n); // bits for both arrays are set
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 4: Swap — with both bugs fixed, pool bitmap correctly
+    //         shows only array [-600, 0) as initialized.
+    //         Swap finds liquidity and succeeds.
+    // ═══════════════════════════════════════════════════════════
+    const bitmapExtension = getTickArrayBitmapPda(pool.poolPda);
+    const tickArrayNeg600 = getTickArrayPda(pool.poolPda, -600);
+    const sqrtPriceLimitX64 = new BN("4295128739");
+
+    await swapV2(
+      context,
+      pool.poolPda,
+      mint0,
+      mint1,
+      pool.vault0,
+      pool.vault1,
+      userAta0,
+      userAta1,
+      new BN(1_000),
+      new BN(0),
+      sqrtPriceLimitX64,
+      true,   // isBaseInput
+      true,   // zeroForOne
+      [bitmapExtension, tickArrayNeg600],
+    );
+    // Swap succeeded — both bugs fixed, bitmap is correct
   });
 });
 

@@ -552,3 +552,101 @@ export async function decreaseLiquidity(
 
   await client.processTransaction(tx);
 }
+
+/**
+ * Perform a swap_v2 on a pool.
+ * zeroForOne = true means swap token0 → token1 (price decreases).
+ * zeroForOne = false means swap token1 → token0 (price increases).
+ * tickArrayPdas: ordered list of tick array PDAs the swap may cross.
+ */
+export async function swapV2(
+  context: ProgramTestContext,
+  poolPda: PublicKey,
+  tokenMint0: PublicKey,
+  tokenMint1: PublicKey,
+  vault0: PublicKey,
+  vault1: PublicKey,
+  userTokenAccount0: PublicKey,
+  userTokenAccount1: PublicKey,
+  amount: BN,
+  otherAmountThreshold: BN,
+  sqrtPriceLimitX64: BN,
+  isBaseInput: boolean,
+  zeroForOne: boolean,
+  tickArrayPdas: PublicKey[],
+): Promise<void> {
+  const client = context.banksClient;
+  const payer = context.payer;
+
+  // Read pool state to get amm_config and observation_key
+  const poolAccount = await client.getAccount(poolPda);
+  if (!poolAccount) throw new Error("Pool account not found");
+  const poolData = poolAccount.data;
+
+  // PoolState layout (after 8-byte discriminator):
+  // offset 8: bump (1 byte)
+  // offset 9: amm_config (32 bytes)
+  // offset 41: owner (32 bytes)
+  // offset 73: token_mint_0 (32 bytes)
+  // offset 105: token_mint_1 (32 bytes)
+  // offset 137: token_vault_0 (32 bytes)
+  // offset 169: token_vault_1 (32 bytes)
+  // offset 201: observation_key (32 bytes)
+  const ammConfig = new PublicKey(poolData.slice(9, 41));
+  const observationState = new PublicKey(poolData.slice(201, 233));
+
+  // Determine input/output based on direction
+  const inputTokenAccount = zeroForOne ? userTokenAccount0 : userTokenAccount1;
+  const outputTokenAccount = zeroForOne ? userTokenAccount1 : userTokenAccount0;
+  const inputVault = zeroForOne ? vault0 : vault1;
+  const outputVault = zeroForOne ? vault1 : vault0;
+  const inputVaultMint = zeroForOne ? tokenMint0 : tokenMint1;
+  const outputVaultMint = zeroForOne ? tokenMint1 : tokenMint0;
+
+  // swap_v2 discriminator: [43, 4, 237, 11, 26, 201, 30, 98]
+  const discriminator = Buffer.from([43, 4, 237, 11, 26, 201, 30, 98]);
+
+  // Args: u64 amount, u64 other_amount_threshold, u128 sqrt_price_limit_x64, bool is_base_input
+  const data = Buffer.alloc(8 + 8 + 8 + 16 + 1);
+  let offset = 0;
+  discriminator.copy(data, offset); offset += 8;
+  data.set(amount.toArrayLike(Buffer, "le", 8), offset); offset += 8;
+  data.set(otherAmountThreshold.toArrayLike(Buffer, "le", 8), offset); offset += 8;
+  data.set(sqrtPriceLimitX64.toArrayLike(Buffer, "le", 16), offset); offset += 16;
+  data.writeUInt8(isBaseInput ? 1 : 0, offset); offset += 1;
+
+  const keys = [
+    { pubkey: payer.publicKey, isSigner: true, isWritable: true },         // payer
+    { pubkey: ammConfig, isSigner: false, isWritable: false },              // amm_config
+    { pubkey: poolPda, isSigner: false, isWritable: true },                 // pool_state
+    { pubkey: inputTokenAccount, isSigner: false, isWritable: true },       // input_token_account
+    { pubkey: outputTokenAccount, isSigner: false, isWritable: true },      // output_token_account
+    { pubkey: inputVault, isSigner: false, isWritable: true },              // input_vault
+    { pubkey: outputVault, isSigner: false, isWritable: true },             // output_vault
+    { pubkey: observationState, isSigner: false, isWritable: true },        // observation_state
+    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },       // token_program
+    { pubkey: TOKEN_PROGRAM_2022_ID, isSigner: false, isWritable: false },  // token_program_2022
+    { pubkey: MEMO_PROGRAM_ID, isSigner: false, isWritable: false },        // memo_program
+    { pubkey: inputVaultMint, isSigner: false, isWritable: false },         // input_vault_mint
+    { pubkey: outputVaultMint, isSigner: false, isWritable: false },        // output_vault_mint
+  ];
+
+  // Add tick arrays as remaining accounts (writable)
+  for (const tickArrayPda of tickArrayPdas) {
+    keys.push({ pubkey: tickArrayPda, isSigner: false, isWritable: true });
+  }
+
+  const ix = new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys,
+    data,
+  });
+
+  const tx = new Transaction();
+  tx.add(ix);
+  tx.recentBlockhash = context.lastBlockhash;
+  tx.feePayer = payer.publicKey;
+  tx.sign(payer);
+
+  await client.processTransaction(tx);
+}
