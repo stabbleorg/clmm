@@ -44,10 +44,12 @@ pub struct DecreaseLiquidityV2<'info> {
 
     /// Stores init state for the lower tick
     /// CHECK: can be both fixed or dynamic
+    #[account(mut)]
     pub tick_array_lower: UncheckedAccount<'info>,
 
     /// Stores init state for the upper tick
     /// CHECK: can be both fixed or dynamic
+    #[account(mut)]
     pub tick_array_upper: UncheckedAccount<'info>,
 
     /// The destination token account for receive amount_0
