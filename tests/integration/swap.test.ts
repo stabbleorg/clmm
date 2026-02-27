@@ -1320,3 +1320,959 @@ describe("swap — fee growth survives shrink→grow realloc cycle", () => {
       .toBe(MIN_LEN + 3 * DYNAMIC_TICK_DATA_LEN); // 456
   });
 });
+
+describe("swap — boundary ticks", () => {
+  /**
+   * TEST 1: FULL-RANGE POSITION AT NEAR-MIN/MAX TICKS
+   *
+   * Opens the widest valid position with tick_spacing = 10:
+   *   tickLower = -443630  (nearest multiple of 10 below MIN_TICK = -443636)
+   *   tickUpper =  443630  (nearest multiple of 10 below MAX_TICK =  443636)
+   *
+   * Tick array coverage:
+   *   Lower array start = getTickArrayStartIndex(-443630, 10) = -444000
+   *     tick -443630 is at offset (-443630 - (-444000)) / 10 = 37
+   *   Upper array start = getTickArrayStartIndex(443630, 10) = 443400
+   *     tick  443630 is at offset (443630 - 443400) / 10 = 23
+   *
+   * Pool price starts at tick 0, well inside [-443630, 443630).
+   * Swap 100K token0 → fees accrue → collect → assert LP fee ≈ 247.
+   *
+   * Tests:
+   * 
+   * 
+   *   - Fee accounting works at boundary tick positions (offsets 37 and 23)
+   */
+  it("should open full-range position at near-MIN/MAX ticks and collect fees", async () => {
+    const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(10);
+    const tickSpacing = 10;
+
+    // MIN_TICK = -443636 → nearest valid (divisible by 10) = -443630
+    // MAX_TICK =  443636 → nearest valid (divisible by 10) =  443630
+    const TICK_LOWER = -443630;
+    const TICK_UPPER =  443630;
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 1: Verify array start indices
+    // ═══════════════════════════════════════════════════════════
+    const lowerArrayStart = getTickArrayStartIndex(TICK_LOWER, tickSpacing); // -444000
+    const upperArrayStart = getTickArrayStartIndex(TICK_UPPER, tickSpacing); //  443400
+    expect(lowerArrayStart).toBe(-444000);
+    expect(upperArrayStart).toBe( 443400);
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 2: Open full-range position with large liquidity
+    //         Pool price = tick 0, inside [-443630, 443630).
+    //         Large liquidity ensures no tick crossing during the swap.
+    // ═══════════════════════════════════════════════════════════
+    const bitmapExtension = getTickArrayBitmapPda(pool.poolPda);
+    const pos = await openPosition(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      TICK_LOWER, TICK_UPPER, tickSpacing,
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+      undefined,                // positionNftMintKeypair
+      undefined,                // baseFlag
+      [bitmapExtension],        // remaining accounts — bitmap extension needed for overflow
+    );
+
+    // Both extreme arrays must now exist as dynamic tick arrays
+    const lowerArray = await context.banksClient.getAccount(getTickArrayPda(pool.poolPda, lowerArrayStart));
+    const upperArray = await context.banksClient.getAccount(getTickArrayPda(pool.poolPda, upperArrayStart));
+    expect(lowerArray).not.toBeNull();
+    expect(upperArray).not.toBeNull();
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 3: Swap 100,000 token0 → token1 (no tick crossing)
+    // ═══════════════════════════════════════════════════════════
+    // Swap direction: zeroForOne → price moves left (toward lower ticks).
+    // The swap engine needs the tick array containing the first initialized
+    // tick at or below tick_current. The only initialized tick below 0 is
+    // -443630 in the extreme lower array at start -444000.
+    // With 1B liquidity the price barely moves — no tick crossing.
+    const tickArrayLower = getTickArrayPda(pool.poolPda, lowerArrayStart); // -444000
+
+    const user0BeforeSwap = await context.banksClient.getAccount(userAta0);
+    const balance0BeforeSwap = Buffer.from(user0BeforeSwap!.data).readBigUInt64LE(64);
+
+    await swapV2(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(100_000),
+      new BN(0),
+      new BN(0),    // sqrtPriceLimitX64 = 0 (no partial fills)
+      true,         // isBaseInput
+      true,         // zeroForOne
+      [bitmapExtension, tickArrayLower],
+    );
+
+    const user0AfterSwap = await context.banksClient.getAccount(userAta0);
+    const balance0AfterSwap = Buffer.from(user0AfterSwap!.data).readBigUInt64LE(64);
+    expect(balance0BeforeSwap - balance0AfterSwap).toBe(BigInt(100_000));
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 4: Collect fees via decreaseLiquidity(liquidity = 0)
+    //         The tick arrays passed must be the ones holding the position's
+    //         ticks — in this case the extreme boundary arrays.
+    // ═══════════════════════════════════════════════════════════
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      pos.positionNftMint,
+      pos.positionNftAccount,
+      pos.personalPosition,
+      pos.tickArrayLower,   // array [-444000, ...) — tick -443630 at offset 37
+      pos.tickArrayUpper,   // array [ 443400, ...) — tick  443630 at offset 23
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(0),    // liquidity = 0 → just collect fees
+      new BN(0),
+      new BN(0),
+      [bitmapExtension],    // bitmap extension needed for overflow arrays
+    );
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 5: Verify LP fee ≈ 247 token0
+    //   trade_fee    = 100,000 × 2500 / 1,000,000 = 250
+    //   protocol_fee = 250    × 12000 / 1,000,000 = 3
+    //   lp_fee       = 247  (±5 for Q64 rounding)
+    // ═══════════════════════════════════════════════════════════
+    const user0AfterCollect = await context.banksClient.getAccount(userAta0);
+    const balance0AfterCollect = Buffer.from(user0AfterCollect!.data).readBigUInt64LE(64);
+
+    const feesCollected0 = balance0AfterCollect - balance0AfterSwap;
+    expect(feesCollected0).toBeGreaterThan(BigInt(0));
+    expect(feesCollected0).toBeGreaterThanOrEqual(BigInt(242));
+    expect(feesCollected0).toBeLessThanOrEqual(BigInt(252));
+  });
+
+  /**
+   * TEST 2: TICKS AT 0th AND 59th OFFSET IN THEIR ARRAY
+   *
+   * With tick_spacing = 10, array [0, 600) has 60 tick slots:
+   *   offset  0 → tick   0
+   *   offset 59 → tick 590
+   *
+   * Position [0, 590): lower tick at offset 0, upper tick at offset 59.
+   * Both ticks are in the SAME array [0, 600).
+   *
+   * Pool price = tick 0, which satisfies 0 <= tick_current < 590 → in range.
+   * Swap 100K token0 → collect fees → assert LP fee ≈ 247.
+   *
+   * Tests:
+   *   - First and last tick slot offsets within a single array
+   *   - No off-by-one in tick_offset() or bitmap lookup
+   *   - Same-array position (both ticks share one dynamic tick array)
+   */
+  it("should handle ticks at 0th and 59th offset in their array", async () => {
+    const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(10);
+    const tickSpacing = 10;
+
+    // offset 0 = tick 0, offset 59 = tick 590, both in array [0, 600)
+    const TICK_LOWER = 0;
+    const TICK_UPPER = 590;
+
+    expect(getTickArrayStartIndex(TICK_LOWER, tickSpacing)).toBe(0);
+    expect(getTickArrayStartIndex(TICK_UPPER, tickSpacing)).toBe(0); // same array
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 1: Open position [0, 590) with large liquidity
+    //         Both ticks in the same array [0, 600).
+    //         tick_current = 0, which is in range [0, 590).
+    // ═══════════════════════════════════════════════════════════
+    const pos = await openPosition(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      TICK_LOWER, TICK_UPPER, tickSpacing,
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 2: Swap 100,000 token1 → token0 (b_to_a, zeroForOne=false)
+    //         tick_current = 0 is the lower bound. A zeroForOne swap
+    //         would immediately cross tick 0 and exhaust all liquidity.
+    //         b_to_a moves price RIGHT (toward tick 590), staying safely
+    //         inside the position.
+    // ═══════════════════════════════════════════════════════════
+    const bitmapExtension = getTickArrayBitmapPda(pool.poolPda);
+    const tickArray0 = getTickArrayPda(pool.poolPda, 0);
+
+    const user1BeforeSwap = await context.banksClient.getAccount(userAta1);
+    const balance1BeforeSwap = Buffer.from(user1BeforeSwap!.data).readBigUInt64LE(64);
+
+    await swapV2(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(100_000),
+      new BN(0),
+      new BN("79226673521066979257578248090"), // MAX_SQRT_PRICE_X64 - 1
+      true,         // isBaseInput
+      false,        // zeroForOne = false → b_to_a (price moves right)
+      [bitmapExtension, tickArray0],
+    );
+
+    const user1AfterSwap = await context.banksClient.getAccount(userAta1);
+    const balance1AfterSwap = Buffer.from(user1AfterSwap!.data).readBigUInt64LE(64);
+    expect(balance1BeforeSwap - balance1AfterSwap).toBe(BigInt(100_000));
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 3: Collect fees (fee is on token1, the input token)
+    // ═══════════════════════════════════════════════════════════
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      pos.positionNftMint,
+      pos.positionNftAccount,
+      pos.personalPosition,
+      pos.tickArrayLower,
+      pos.tickArrayUpper,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(0),
+      new BN(0),
+      new BN(0),
+    );
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 4: Verify LP fee ≈ 247 token1 (input token for b_to_a)
+    // ═══════════════════════════════════════════════════════════
+    const user1AfterCollect = await context.banksClient.getAccount(userAta1);
+    const balance1AfterCollect = Buffer.from(user1AfterCollect!.data).readBigUInt64LE(64);
+
+    const feesCollected1 = balance1AfterCollect - balance1AfterSwap;
+    expect(feesCollected1).toBeGreaterThan(BigInt(0));
+    expect(feesCollected1).toBeGreaterThanOrEqual(BigInt(242));
+    expect(feesCollected1).toBeLessThanOrEqual(BigInt(252));
+  });
+
+  /**
+   * TEST 3: TICK EXACTLY ON TICK ARRAY BOUNDARY
+   *
+   * Position [-600, 600):
+   *   lower tick = -600 → offset 0 of array [-600, 0)  (start of array)
+   *   upper tick =  600 → offset 0 of array [600, 1200) (start of next array)
+   *
+   * Both ticks sit exactly at their array's start index — the boundary
+   * between two adjacent arrays.
+   *
+   * Pool price = tick 0, which is in range (-600 <= 0 < 600).
+   * Swap 100K token0 → collect fees → assert LP fee ≈ 247.
+   *
+   * Tests:
+   *   - Tick at exact array boundary (offset 0) on both sides
+   *   - Cross-array position with boundary-aligned ticks
+   *   - Bitmap bit set correctly for boundary arrays
+   */
+  it("should handle ticks exactly on tick array boundaries", async () => {
+    const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(10);
+    const tickSpacing = 10;
+
+    const TICK_LOWER = -600;
+    const TICK_UPPER =  600;
+
+    // Both ticks are at offset 0 of their respective arrays
+    expect(getTickArrayStartIndex(TICK_LOWER, tickSpacing)).toBe(-600);
+    expect(getTickArrayStartIndex(TICK_UPPER, tickSpacing)).toBe( 600);
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 1: Open position [-600, 600) with large liquidity
+    //         tick_current = 0, in range [-600, 600).
+    // ═══════════════════════════════════════════════════════════
+    const pos = await openPosition(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      TICK_LOWER, TICK_UPPER, tickSpacing,
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 2: Swap 100,000 token0 → token1 (zeroForOne)
+    //         The first initialized tick at or below 0 is -600
+    //         (in array [-600, 0)). With 1B liquidity the price barely
+    //         moves — no tick crossing.
+    // ═══════════════════════════════════════════════════════════
+    const bitmapExtension = getTickArrayBitmapPda(pool.poolPda);
+    const tickArrayNeg600 = getTickArrayPda(pool.poolPda, -600);
+
+    const user0BeforeSwap = await context.banksClient.getAccount(userAta0);
+    const balance0BeforeSwap = Buffer.from(user0BeforeSwap!.data).readBigUInt64LE(64);
+
+    await swapV2(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(100_000),
+      new BN(0),
+      new BN(0),
+      true,         // isBaseInput
+      true,         // zeroForOne
+      [bitmapExtension, tickArrayNeg600],
+    );
+
+    const user0AfterSwap = await context.banksClient.getAccount(userAta0);
+    const balance0AfterSwap = Buffer.from(user0AfterSwap!.data).readBigUInt64LE(64);
+    expect(balance0BeforeSwap - balance0AfterSwap).toBe(BigInt(100_000));
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 3: Collect fees
+    // ═══════════════════════════════════════════════════════════
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      pos.positionNftMint,
+      pos.positionNftAccount,
+      pos.personalPosition,
+      pos.tickArrayLower,
+      pos.tickArrayUpper,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(0),
+      new BN(0),
+      new BN(0),
+    );
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 4: Verify LP fee ≈ 247 token0
+    // ═══════════════════════════════════════════════════════════
+    const user0AfterCollect = await context.banksClient.getAccount(userAta0);
+    const balance0AfterCollect = Buffer.from(user0AfterCollect!.data).readBigUInt64LE(64);
+
+    const feesCollected0 = balance0AfterCollect - balance0AfterSwap;
+    expect(feesCollected0).toBeGreaterThan(BigInt(0));
+    expect(feesCollected0).toBeGreaterThanOrEqual(BigInt(242));
+    expect(feesCollected0).toBeLessThanOrEqual(BigInt(252));
+  });
+});
+
+describe("swap — dynamic memory bounds at offset 0 and offset 59", () => {
+  /**
+   * MEMORY BOUNDS STRESS TEST: INSERT/REMOVE AT OFFSET 0 AND OFFSET 59
+   *
+   * DynamicTickArray stores ticks as sorted variable-length entries.
+   * Inserting at offset N does rotate_right(112) on all bytes AFTER N.
+   * Removing at offset N does rotate_left(112) on all bytes AFTER N.
+   *
+   * The two most dangerous offsets:
+   *
+   *   Offset 0 (first slot):
+   *     Insert → rotate_right shifts EVERY existing tick in the array.
+   *     Remove → rotate_left shifts EVERY existing tick LEFT.
+   *     This is the maximum-length rotation. Off-by-one in the start
+   *     position or byte count corrupts the first tick's data.
+   *
+   *   Offset 59 (last slot):
+   *     Insert → rotate_right shifts NOTHING (no bytes after the last slot).
+   *     Remove → rotate_left shifts NOTHING.
+   *     The rotation length is 0, which is the edge case for bounds
+   *     calculation. If the code computes `data[pos..end]` and `end`
+   *     is off by 1, it reads/writes past the buffer.
+   *
+   * Timeline (all in array [0, 600), tick_spacing = 10):
+   *
+   *   Open M: [-100, 300) — tick 300 at offset 30 in [0, 600). IN RANGE.
+   *     Array: 1 tick → 232 bytes.
+   *
+   *   Swap 100K token0 → fees accrue on M (only in-range position).
+   *
+   *   Open A: [0, 10) — offsets 0, 1. Shifts tick 300 RIGHT by 2 × 112.
+   *     Array: 3 ticks → 456 bytes.
+   *
+   *   Open B: [580, 590) — offsets 58, 59. Tick 300 at offset 30 is
+   *     BEFORE these, so unaffected. Tests end-of-array allocation.
+   *     Array: 5 ticks → 680 bytes.
+   *
+   *   Close B — offsets 59, 58 removed. Tests removal at array END.
+   *     Array: 3 ticks → 456 bytes.
+   *
+   *   Close A — offsets 1, 0 removed. Shifts tick 300 LEFT by 2 × 112.
+   *     Array: 1 tick → 232 bytes.
+   *
+   *   Collect fees on M → if any rotate was wrong, fee_growth_outside
+   *     on tick 300 is corrupted and feesCollected ≠ ~247.
+   *
+   * Verifies:
+   *   1. Array size correct after each open/close (232→456→680→456→232)
+   *   2. Fee collection succeeds → fee_growth_outside survived all shifts
+   *   3. LP fee ≈ 247 token0
+   */
+  it("should survive insert/remove at offset 0 and offset 59", async () => {
+    const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(10);
+    const tickSpacing = 10;
+    const DYNAMIC_TICK_DATA_LEN = 112;
+    const MIN_LEN = 120;
+
+    const tickArray0      = getTickArrayPda(pool.poolPda, 0);
+    const tickArrayNeg600 = getTickArrayPda(pool.poolPda, -600);
+    const bitmapExtension = getTickArrayBitmapPda(pool.poolPda);
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 1: Open monitor position M: [-100, 300)
+    //         tick -100 → offset 50 in array [-600, 0)
+    //         tick  300 → offset 30 in array [0, 600)
+    //         tick_current = 0, in range [-100, 300).
+    // ═══════════════════════════════════════════════════════════
+    const posM = await openPosition(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      -100, 300, tickSpacing,
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // Array [0, 600): 1 initialized tick (300 at offset 30)
+    expect((await context.banksClient.getAccount(tickArray0))!.data.length)
+      .toBe(MIN_LEN + 1 * DYNAMIC_TICK_DATA_LEN); // 232
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 2: Swap 100,000 token0 → fees accrue ONLY on M
+    //         (the only in-range position at this point)
+    // ═══════════════════════════════════════════════════════════
+    await swapV2(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(100_000),
+      new BN(0),
+      new BN(0),
+      true,         // isBaseInput
+      true,         // zeroForOne
+      [bitmapExtension, tickArray0, tickArrayNeg600],
+    );
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 3: Open A: [0, 10) — offsets 0 and 1 in array [0, 600)
+    //         Insert at offset 0: rotate_right(112) shifts tick 300
+    //           (offset 30) and all bytes after it RIGHT.
+    //         Insert at offset 1: rotate_right(112) again.
+    //         Tick 300's fee_growth_outside bytes shift RIGHT by 224.
+    // ═══════════════════════════════════════════════════════════
+    const posA = await openPosition(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      0, 10, tickSpacing,
+      new BN(100_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // Array [0, 600): 3 initialized ticks (0, 10, 300)
+    expect((await context.banksClient.getAccount(tickArray0))!.data.length)
+      .toBe(MIN_LEN + 3 * DYNAMIC_TICK_DATA_LEN); // 456
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 4: Open B: [580, 590) — offsets 58 and 59 in array [0, 600)
+    //         Insert at offset 58: rotate_right(112) on bytes after 58.
+    //           Tick 300 at offset 30 is BEFORE 58, unaffected.
+    //         Insert at offset 59: rotate_right(112) — nothing after
+    //           offset 59 to shift. Zero-length rotation edge case.
+    // ═══════════════════════════════════════════════════════════
+    const posB = await openPosition(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      580, 590, tickSpacing,
+      new BN(100_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // Array [0, 600): 5 initialized ticks (0, 10, 300, 580, 590)
+    expect((await context.banksClient.getAccount(tickArray0))!.data.length)
+      .toBe(MIN_LEN + 5 * DYNAMIC_TICK_DATA_LEN); // 680
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 5: Close B — remove offsets 59 and 58 (end-of-array removal)
+    //         Removing offset 59: rotate_left(112) with nothing after it.
+    //           Zero-length shift — tests bounds at the buffer's end.
+    //         Removing offset 58: same (59 already gone).
+    // ═══════════════════════════════════════════════════════════
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      posB.positionNftMint,
+      posB.positionNftAccount,
+      posB.personalPosition,
+      posB.tickArrayLower,
+      posB.tickArrayUpper,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(100_000),  // full liquidity → both ticks uninitialized → shrink
+      new BN(0),
+      new BN(0),
+    );
+
+    // Array [0, 600): 3 initialized ticks (0, 10, 300)
+    expect((await context.banksClient.getAccount(tickArray0))!.data.length)
+      .toBe(MIN_LEN + 3 * DYNAMIC_TICK_DATA_LEN); // 456
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 6: Close A — remove offsets 1 and 0 (start-of-array removal)
+    //         Removing offset 1: rotate_left(112) shifts tick 300
+    //           (offset 30) and everything after it LEFT.
+    //         Removing offset 0: rotate_left(112) shifts tick 300 LEFT
+    //           again. Tick 300's fee_growth_outside bytes shift LEFT
+    //           by 224 total. If any shift used the wrong start byte
+    //           or byte count, the fee data is corrupted.
+    // ═══════════════════════════════════════════════════════════
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      posA.positionNftMint,
+      posA.positionNftAccount,
+      posA.personalPosition,
+      posA.tickArrayLower,
+      posA.tickArrayUpper,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(100_000),  // full liquidity → both ticks uninitialized → shrink
+      new BN(0),
+      new BN(0),
+    );
+
+    // Array [0, 600): back to 1 initialized tick (300 only)
+    expect((await context.banksClient.getAccount(tickArray0))!.data.length)
+      .toBe(MIN_LEN + 1 * DYNAMIC_TICK_DATA_LEN); // 232
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 7: Collect fees on M (liquidity = 0)
+    //         Reads fee_growth_outside on tick 300 (offset 30) which has
+    //         been shifted RIGHT 2× (step 3), then LEFT 2× (step 6).
+    //         If any rotate was wrong, this value is garbage and
+    //         feesCollected ≠ ~247.
+    // ═══════════════════════════════════════════════════════════
+    const user0BeforeCollect = await context.banksClient.getAccount(userAta0);
+    const balance0BeforeCollect = Buffer.from(user0BeforeCollect!.data).readBigUInt64LE(64);
+
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      posM.positionNftMint,
+      posM.positionNftAccount,
+      posM.personalPosition,
+      posM.tickArrayLower,
+      posM.tickArrayUpper,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(0),    // liquidity = 0 → just collect fees
+      new BN(0),
+      new BN(0),
+    );
+
+    const user0AfterCollect = await context.banksClient.getAccount(userAta0);
+    const balance0AfterCollect = Buffer.from(user0AfterCollect!.data).readBigUInt64LE(64);
+
+    const feesCollected0 = balance0AfterCollect - balance0BeforeCollect;
+
+    // Fees must be non-zero — proves fee accounting ran correctly
+    expect(feesCollected0).toBeGreaterThan(BigInt(0));
+
+    // LP fee ≈ 247 token0 (proves fee_growth_outside survived all 4 rotations)
+    expect(feesCollected0).toBeGreaterThanOrEqual(BigInt(242));
+    expect(feesCollected0).toBeLessThanOrEqual(BigInt(252));
+  });
+});
+
+describe("swap — zombie account: shrink to zero then reopen same array", () => {
+  /**
+   * ZOMBIE ACCOUNT BUG — SHRINK TO ZERO → REOPEN SAME ARRAY
+   *
+   * When every tick in a DynamicTickArray is uninitialized (all positions
+   * closed), the array shrinks to MIN_LEN (120 bytes). But the account
+   * still exists at its PDA — it's a "zombie": allocated, owned by the
+   * program, with a valid discriminator, but holding zero initialized ticks.
+   *
+   * The danger: when a NEW position reuses that zombie PDA, the program
+   * must correctly grow the account and initialize the new tick data from
+   * scratch — NOT inherit stale fee_growth_outside values left behind
+   * in the zombie's memory.
+   *
+   * This test creates a two-cycle scenario that detects fee leakage:
+   *
+   *   CYCLE 1 (taint the account):
+   *     Open A: [-100, 100) → arrays [-600,0) and [0,600) created
+   *     Swap 100K token0 → fee_growth_global_0_x64 becomes non-zero
+   *     Close A → both arrays shrink to 120 bytes (zombie!)
+   *       pool.fee_growth_global_0_x64 is still non-zero.
+   *       The zombie accounts' raw bytes may contain stale fee data.
+   *
+   *   CYCLE 2 (reuse the zombie):
+   *     Open B: [-200, 200) → REUSES both zombie arrays
+   *       Program must grow from 120 to 232 bytes, initialize B's
+   *       ticks with fee_growth_outside = current fee_growth_global.
+   *     Swap 100K token0 → fees accrue on B
+   *     Collect fees on B → should be ≈ 247 (ONLY from cycle 2's swap)
+   *
+   *   If the zombie account leaked stale fee_growth_outside from A's
+   *   ticks (cycle 1), the fee calculation would be corrupted:
+   *     - Phantom extra fees (fee_growth_outside too low → more fees)
+   *     - Missing fees (fee_growth_outside too high → fewer/no fees)
+   *
+   * Verifies:
+   *   1. Zombie accounts exist at MIN_LEN after close
+   *   2. Reopen grows arrays from 120 → 232 bytes correctly
+   *   3. LP fee on B ≈ 247 token0 — no fee leakage from cycle 1
+   *   4. Array sizes correct throughout both cycles
+   */
+  it("should correctly reuse zombie tick arrays with no fee leakage", async () => {
+    const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(10);
+    const tickSpacing = 10;
+    const DYNAMIC_TICK_DATA_LEN = 112;
+    const MIN_LEN = 120;
+
+    const tickArray0      = getTickArrayPda(pool.poolPda, 0);
+    const tickArrayNeg600 = getTickArrayPda(pool.poolPda, -600);
+    const bitmapExtension = getTickArrayBitmapPda(pool.poolPda);
+
+    // ═══════════════════════════════════════════════════════════
+    // CYCLE 1: TAINT — Create arrays, accrue fees, then zombie
+    // ═══════════════════════════════════════════════════════════
+
+    // Open A: [-100, 100) — straddles tick 0, in range
+    //   tick -100 → offset 50 in array [-600, 0)
+    //   tick  100 → offset 10 in array [0, 600)
+    const posA = await openPosition(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      -100, 100, tickSpacing,
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // Both arrays now exist with 1 initialized tick each
+    expect((await context.banksClient.getAccount(tickArray0))!.data.length)
+      .toBe(MIN_LEN + 1 * DYNAMIC_TICK_DATA_LEN); // 232
+    expect((await context.banksClient.getAccount(tickArrayNeg600))!.data.length)
+      .toBe(MIN_LEN + 1 * DYNAMIC_TICK_DATA_LEN); // 232
+
+    // Swap 100K token0 → fee_growth_global_0_x64 becomes non-zero
+    // This "taints" the pool state: any new tick initialized AFTER this
+    // must have fee_growth_outside set to the current fee_growth_global.
+    await swapV2(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(100_000),
+      new BN(0),
+      new BN(0),
+      true,         // isBaseInput
+      true,         // zeroForOne
+      [bitmapExtension, tickArray0, tickArrayNeg600],
+    );
+
+    // Close A: remove all liquidity → ticks uninitialized → arrays shrink
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      posA.positionNftMint,
+      posA.positionNftAccount,
+      posA.personalPosition,
+      posA.tickArrayLower,
+      posA.tickArrayUpper,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(1_000_000_000),  // full liquidity → both ticks uninitialized
+      new BN(0),
+      new BN(0),
+    );
+
+    // ═══════════════════════════════════════════════════════════
+    // VERIFY ZOMBIE STATE: accounts exist, MIN_LEN, 0 initialized ticks
+    // ═══════════════════════════════════════════════════════════
+    const zombie0 = await context.banksClient.getAccount(tickArray0);
+    const zombieNeg600 = await context.banksClient.getAccount(tickArrayNeg600);
+
+    // Accounts still exist (not closed)
+    expect(zombie0).not.toBeNull();
+    expect(zombieNeg600).not.toBeNull();
+
+    // Shrunk to minimum size (no initialized ticks)
+    expect(zombie0!.data.length).toBe(MIN_LEN);
+    expect(zombieNeg600!.data.length).toBe(MIN_LEN);
+    // After many transactions with the same lastBlockhash, bankrun may
+    // reject new ones as "already processed". Fetch a fresh blockhash
+    // and override the getter so all subsequent helpers use it.
+    const [freshBlockhash] = (await context.banksClient.getLatestBlockhash())!;
+    Object.defineProperty(context, "lastBlockhash", { value: freshBlockhash });
+
+    // ═══════════════════════════════════════════════════════════
+    // CYCLE 2: REUSE — Open new position in zombie arrays
+    // ═══════════════════════════════════════════════════════════
+
+    // Open B: [-200, 200) — DIFFERENT ticks than A, SAME arrays
+    //   tick -200 → offset 40 in zombie array [-600, 0)
+    //   tick  200 → offset 20 in zombie array [0, 600)
+    //   tick_current ≈ -1 (slightly moved by cycle 1's swap), in range.
+    const posB = await openPosition(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      -200, 200, tickSpacing,
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // Zombie arrays resurrected: grown from 120 → 232 bytes
+    expect((await context.banksClient.getAccount(tickArray0))!.data.length)
+      .toBe(MIN_LEN + 1 * DYNAMIC_TICK_DATA_LEN); // 232
+    expect((await context.banksClient.getAccount(tickArrayNeg600))!.data.length)
+      .toBe(MIN_LEN + 1 * DYNAMIC_TICK_DATA_LEN); // 232
+
+    // Swap 100K token0 → fees accrue ONLY on B
+    await swapV2(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(100_000),
+      new BN(0),
+      new BN(0),
+      true,         // isBaseInput
+      true,         // zeroForOne
+      [bitmapExtension, tickArray0, tickArrayNeg600],
+    );
+
+    // ═══════════════════════════════════════════════════════════
+    // COLLECT FEES ON B — must be ≈ 247 (only cycle 2's swap)
+    //
+    // If the zombie account leaked stale fee_growth_outside from A's
+    // ticks, the fee calculation would produce a different value:
+    //   - fee_growth_outside too low → phantom extra fees (> 247)
+    //   - fee_growth_outside too high → missing fees (< 247 or 0)
+    // ═══════════════════════════════════════════════════════════
+    const user0BeforeCollect = await context.banksClient.getAccount(userAta0);
+    const balance0BeforeCollect = Buffer.from(user0BeforeCollect!.data).readBigUInt64LE(64);
+
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      posB.positionNftMint,
+      posB.positionNftAccount,
+      posB.personalPosition,
+      posB.tickArrayLower,
+      posB.tickArrayUpper,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(0),    // liquidity = 0 → just collect fees
+      new BN(0),
+      new BN(0),
+    );
+
+    const user0AfterCollect = await context.banksClient.getAccount(userAta0);
+    const balance0AfterCollect = Buffer.from(user0AfterCollect!.data).readBigUInt64LE(64);
+
+    const feesCollected0 = balance0AfterCollect - balance0BeforeCollect;
+
+    // Fees must be non-zero — proves fee accounting ran on the resurrected array
+    expect(feesCollected0).toBeGreaterThan(BigInt(0));
+
+    // LP fee ≈ 247 token0 — ONLY from cycle 2's swap, no leakage from cycle 1
+    //   trade_fee    = 100,000 × 2500 / 1,000,000 = 250
+    //   protocol_fee = 250    × 12000 / 1,000,000 = 3
+    //   lp_fee       = 247  (±5 for Q64 rounding)
+    expect(feesCollected0).toBeGreaterThanOrEqual(BigInt(242));
+    expect(feesCollected0).toBeLessThanOrEqual(BigInt(252));
+  });
+});
+
+describe("swap — tick spacing variation (tickSpacing = 1)", () => {
+  /**
+   * TICK SPACING VARIATION — STABLECOIN-STYLE POOL (tickSpacing = 1)
+   *
+   * Every other test in the suite uses tickSpacing = 10. This test uses
+   * tickSpacing = 1 to exercise the code paths that are sensitive to spacing:
+   *
+   *   1. get_offset() math: (tick_index - start_index) / tick_spacing
+   *      With spacing=1, every integer tick maps to a unique offset.
+   *      With spacing=10, only multiples of 10 are valid — different division.
+   *
+   *   2. Array boundaries: each array covers 60 × tickSpacing ticks.
+   *      spacing=1 → 60 ticks per array (vs 600 with spacing=10).
+   *      Tick 30 is at offset 30 in array [0, 60), not offset 3 in [0, 600).
+   *
+   *   3. Tick array PDA derivation: start_index changes with spacing.
+   *      getTickArrayStartIndex(50, 1) = 0, but getTickArrayStartIndex(50, 10) = 0 too —
+   *      however getTickArrayStartIndex(61, 1) = 60, while getTickArrayStartIndex(61, 10) = 0.
+   *
+   *   4. Bitmap mapping: different start indices → different bits flipped.
+   *
+   * Test plan: open position, swap both directions, collect fees.
+   * If any offset/boundary math is wrong, the swap or fee collection will fail.
+   *
+   * Fee math (same rates as other tests):
+   *   trade_fee    = 100,000 × 2500 / 1,000,000 = 250
+   *   protocol_fee = 250    × 12000 / 1,000,000 = 3
+   *   lp_fee       = 250 - 3 = 247  (±5 for Q64 rounding)
+   */
+  it("should open, swap both directions, and collect fees with tickSpacing = 1", async () => {
+    // ─── Setup pool with tickSpacing = 1 ───
+    const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(1);
+    const tickSpacing = 1;
+
+    // Verify array boundaries differ from tickSpacing=10
+    // Tick 50 with spacing=1: start_index = 0, array covers [0, 60)
+    // Tick -30 with spacing=1: start_index = -60, array covers [-60, 0)
+    expect(getTickArrayStartIndex(50, tickSpacing)).toBe(0);
+    expect(getTickArrayStartIndex(-30, tickSpacing)).toBe(-60);
+    // Compare: with spacing=10, both would be in [0, 600) and [-600, 0)
+    expect(getTickArrayStartIndex(50, 10)).toBe(0);
+    expect(getTickArrayStartIndex(-30, 10)).toBe(-600);
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 1: Open position [-30, 30) — straddles tick_current (0)
+    //         With spacing=1: lower in array [-60, 0), upper in array [0, 60)
+    // ═══════════════════════════════════════════════════════════
+    const pos = await openPosition(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      -30, 30, tickSpacing,
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    const bitmapExtension = getTickArrayBitmapPda(pool.poolPda);
+    const tickArray0 = getTickArrayPda(pool.poolPda, 0);
+    const tickArrayNeg60 = getTickArrayPda(pool.poolPda, -60);
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 2: Swap 100,000 token0 → token1 (zeroForOne)
+    //         Price moves left, stays within position.
+    // ═══════════════════════════════════════════════════════════
+    await swapV2(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(100_000),
+      new BN(0),
+      new BN(0),
+      true,         // isBaseInput
+      true,         // zeroForOne
+      [bitmapExtension, tickArray0, tickArrayNeg60],
+    );
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 3: Swap 50,000 token1 → token0 (oneForZero)
+    //         Price moves right, still within position.
+    //         Proves both swap directions work at this tick spacing.
+    // ═══════════════════════════════════════════════════════════
+    await swapV2(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(50_000),
+      new BN(0),
+      new BN(0),
+      true,         // isBaseInput
+      false,        // oneForZero (token1 → token0)
+      [bitmapExtension, tickArrayNeg60, tickArray0],
+    );
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 4: Collect fees (liquidity = 0)
+    // ═══════════════════════════════════════════════════════════
+    const user0BeforeCollect = await context.banksClient.getAccount(userAta0);
+    const balance0BeforeCollect = Buffer.from(user0BeforeCollect!.data).readBigUInt64LE(64);
+
+    await decreaseLiquidity(
+      context,
+      pool.poolPda,
+      pos.positionNftMint,
+      pos.positionNftAccount,
+      pos.personalPosition,
+      pos.tickArrayLower,
+      pos.tickArrayUpper,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      new BN(0),    // liquidity = 0 → just collect fees
+      new BN(0),
+      new BN(0),
+    );
+
+    const user0AfterCollect = await context.banksClient.getAccount(userAta0);
+    const balance0AfterCollect = Buffer.from(user0AfterCollect!.data).readBigUInt64LE(64);
+
+    const feesCollected0 = balance0AfterCollect - balance0BeforeCollect;
+
+    // ═══════════════════════════════════════════════════════════
+    // VERIFY: Fees collected from zeroForOne swap ≈ 247 token0
+    //   trade_fee    = 100,000 × 2500 / 1,000,000 = 250
+    //   protocol_fee = 250    × 12000 / 1,000,000 = 3
+    //   lp_fee       = 247  (±5 for Q64 rounding)
+    //
+    // The oneForZero swap generates token1 fees (not token0),
+    // so feesCollected0 reflects only the zeroForOne swap's LP fee.
+    // ═══════════════════════════════════════════════════════════
+    expect(feesCollected0).toBeGreaterThan(BigInt(0));
+    expect(feesCollected0).toBeGreaterThanOrEqual(BigInt(242));
+    expect(feesCollected0).toBeLessThanOrEqual(BigInt(252));
+
+    // Dynamic tick arrays exist and have correct sizing
+    const array0 = await context.banksClient.getAccount(tickArray0);
+    const arrayNeg60 = await context.banksClient.getAccount(tickArrayNeg60);
+    expect(array0).not.toBeNull();
+    expect(arrayNeg60).not.toBeNull();
+    // Both arrays should have 1 initialized tick each (tick 30 and tick -30)
+    expect(array0!.data.length).toBe(120 + 112);   // MIN_LEN + 1 tick
+    expect(arrayNeg60!.data.length).toBe(120 + 112);
+  });
+});

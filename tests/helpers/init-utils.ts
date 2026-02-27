@@ -306,6 +306,8 @@ export async function openPosition(
   amount1Max: BN,
   positionNftMintKeypair?: Keypair,
   baseFlag?: boolean,
+
+  remainingAccounts?: PublicKey[],
 ): Promise<OpenPositionResult> {
   const client = context.banksClient;
   const payer = context.payer;
@@ -362,9 +364,7 @@ export async function openPosition(
   // protocol_position — deprecated, pass any account (use payer)
   const protocolPosition = payer.publicKey;
 
-  const ix = new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [
+  const keys = [
       { pubkey: payer.publicKey, isSigner: true, isWritable: true },           // payer
       { pubkey: payer.publicKey, isSigner: false, isWritable: false },         // position_nft_owner
       { pubkey: nftMintKeypair.publicKey, isSigner: true, isWritable: true },  // position_nft_mint
@@ -385,7 +385,18 @@ export async function openPosition(
       { pubkey: TOKEN_PROGRAM_2022_ID, isSigner: false, isWritable: false },   // token_program_2022
       { pubkey: tokenMint0, isSigner: false, isWritable: false },              // vault_0_mint
       { pubkey: tokenMint1, isSigner: false, isWritable: false },              // vault_1_mint
-    ],
+  ];
+
+  // Append any remaining accounts (e.g. bitmap extension for boundary ticks)
+  if (remainingAccounts) {
+    for (const account of remainingAccounts) {
+      keys.push({ pubkey: account, isSigner: false, isWritable: true });
+    }
+  }
+
+  const ix = new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys,
     data: data.subarray(0, offset),
   });
 
@@ -504,6 +515,7 @@ export async function decreaseLiquidity(
   liquidity: BN,
   amount0Min: BN,
   amount1Min: BN,
+  remainingAccounts?: PublicKey[],
 ): Promise<void> {
   const client = context.banksClient;
   const payer = context.payer;
@@ -540,6 +552,7 @@ export async function decreaseLiquidity(
       { pubkey: MEMO_PROGRAM_ID, isSigner: false, isWritable: false },      // memo_program
       { pubkey: tokenMint0, isSigner: false, isWritable: false },           // vault_0_mint
       { pubkey: tokenMint1, isSigner: false, isWritable: false },           // vault_1_mint
+      ...(remainingAccounts ?? []).map(pubkey => ({ pubkey, isSigner: false, isWritable: true })),
     ],
     data,
   });

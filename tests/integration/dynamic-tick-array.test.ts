@@ -2997,3 +2997,97 @@ describe("dynamic tick array — rent & lamport economics", () => {
     expect(arrayAfter!.lamports).toBe(lamportsBefore);
   });
 });
+
+describe("dynamic tick array — safety checks", () => {
+  /**
+   * DECREASE MORE LIQUIDITY THAN EXISTS — BASIC SAFETY CHECK
+   *
+   * Opens a position with 1,000,000 liquidity, then attempts to remove
+   * 2,000,000 — more than the position holds.
+   *
+   * The program's decrease_liquidity handler has:
+   *   assert!(liquidity <= personal_position.liquidity);
+   *
+   * This is a Rust assert! (not an Anchor require!), so it triggers a
+   * program panic rather than a graceful error return. Either way, the
+   * transaction must fail and ALL state changes must be rolled back:
+   *   - Tick array size unchanged (no shrink happened)
+   *   - Tick bitmap unchanged (ticks still initialized)
+   *   - Pool state unchanged
+   *   - Token balances unchanged
+   *
+   * This is a basic safety check against underflow in the liquidity
+   * accounting — the Solana equivalent of a "withdraw more than you have"
+   * guard.
+   */
+  it("should reject decrease_liquidity when amount exceeds position liquidity", async () => {
+    const { context, pool, mint0, mint1, userAta0, userAta1 } = await setupPool(10);
+    const tickSpacing = 10;
+
+    // Open position with exactly 1,000,000 liquidity
+    const openLiq = new BN(1_000_000);
+    const position = await openPosition(
+      context,
+      pool.poolPda,
+      mint0, mint1,
+      pool.vault0, pool.vault1,
+      userAta0, userAta1,
+      100, 200, tickSpacing,
+      openLiq,
+      new BN(1_000_000_000),
+      new BN(1_000_000_000),
+    );
+
+    // Snapshot state before the bad decrease
+    const arrayBefore = await context.banksClient.getAccount(position.tickArrayLower);
+    expect(arrayBefore).not.toBeNull();
+    const sizeBefore = arrayBefore!.data.length;
+    const lamportsBefore = arrayBefore!.lamports;
+
+    const poolBefore = await context.banksClient.getAccount(pool.poolPda);
+    const poolDataBefore = Buffer.from(poolBefore!.data);
+
+    const user0Before = await context.banksClient.getAccount(userAta0);
+    const balance0Before = Buffer.from(user0Before!.data).readBigUInt64LE(64);
+
+    // Attempt to remove 2,000,000 — DOUBLE the position's liquidity
+    await expect(
+      decreaseLiquidity(
+        context,
+        pool.poolPda,
+        position.positionNftMint,
+        position.positionNftAccount,
+        position.personalPosition,
+        position.tickArrayLower,
+        position.tickArrayUpper,
+        mint0, mint1,
+        pool.vault0, pool.vault1,
+        userAta0, userAta1,
+        new BN(2_000_000),  // 2× the actual liquidity
+        new BN(0),
+        new BN(0),
+      )
+    ).rejects.toThrow();
+
+    // 1) Tick array unchanged — failed tx rolled back, no shrink
+    const arrayAfter = await context.banksClient.getAccount(position.tickArrayLower);
+    expect(arrayAfter).not.toBeNull();
+    expect(arrayAfter!.data.length).toBe(sizeBefore);
+    expect(arrayAfter!.lamports).toBe(lamportsBefore);
+
+    // 2) Tick bitmap unchanged — ticks still initialized
+    const bitmapBefore = readBitmapFromAccount(arrayBefore!.data, BITMAP_OFFSET, BITMAP_LEN);
+    const bitmapAfter = readBitmapFromAccount(arrayAfter!.data, BITMAP_OFFSET, BITMAP_LEN);
+    expect(bitmapAfter).toBe(bitmapBefore);
+
+    // 3) Pool state unchanged
+    const poolAfter = await context.banksClient.getAccount(pool.poolPda);
+    const poolDataAfter = Buffer.from(poolAfter!.data);
+    expect(poolDataAfter).toEqual(poolDataBefore);
+
+    // 4) Token balance unchanged — no tokens withdrawn
+    const user0After = await context.banksClient.getAccount(userAta0);
+    const balance0After = Buffer.from(user0After!.data).readBigUInt64LE(64);
+    expect(balance0After).toBe(balance0Before);
+  });
+});
