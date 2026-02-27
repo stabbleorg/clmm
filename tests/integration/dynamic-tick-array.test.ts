@@ -9,8 +9,10 @@ import {
   openPosition,
   increaseLiquidity,
   decreaseLiquidity,
-
   swapV2,
+  preCreateFixedTickArray,
+  FIXED_TICK_ARRAY_LEN,
+  FIXED_TICK_ARRAY_DISCRIMINATOR,
 } from "../helpers/init-utils";
 import { getTickArrayStartIndex, PROGRAM_ID } from "../helpers/constants";
 import { getTickArrayPda, getTickArrayBitmapPda } from "../helpers/pda";
@@ -1170,87 +1172,9 @@ function readBitmapFromAccount(data: Uint8Array, offset: number, len: number): b
 // (TickArrayState) discriminator via bankrun's setAccount before calling
 // openPosition.
 // ═══════════════════════════════════════════════════════════════════════
-
-// Anchor discriminator: sha256("account:TickArrayState")[0..8]
-const FIXED_TICK_ARRAY_DISCRIMINATOR = Buffer.from([192, 155, 85, 205, 49, 249, 129, 42]);
-
-// TickArrayState (FixedTickArray) layout — cross-referenced with:
-//   programs/clmm/src/states/fixed_tick_array.rs
-//   pub const LEN: usize = 8 + 32 + 4 + TickState::LEN * TICK_ARRAY_SIZE_USIZE + 1 + 115;
 //
-// Field breakdown:
-//   discriminator:          8  bytes  (Anchor account discriminator)
-//   pool_id:               32  bytes  (Pubkey)
-//   start_tick_index:       4  bytes  (i32)
-//   ticks [TickState; 60]: 10080 bytes (168 * 60 = 10080)
-//   initialized_tick_count: 1  byte   (u8)
-//   recent_epoch + padding:115  bytes  (u64 + [u8; 107])
-//                         ──────────
-//   TOTAL:              10240  bytes
-//
-// ⚠️  If TickArrayState or TickState fields are ever added/removed in Rust,
-//    update this constant AND the layout comment above. Mismatch will cause
-//    load_tick_array_mut to read garbage from misaligned offsets.
-const FIXED_TICK_ARRAY_LEN = 8 + 32 + 4 + 168 * 60 + 1 + 115; // = 10240
-
-// Compile-time sanity check — if arithmetic above is wrong, this assertion
-// fires immediately when the test file is loaded, before any test runs.
-if (FIXED_TICK_ARRAY_LEN !== 10240) {
-  throw new Error(
-    `FIXED_TICK_ARRAY_LEN computed as ${FIXED_TICK_ARRAY_LEN}, expected 10240. ` +
-    `Check TickArrayState layout in fixed_tick_array.rs.`
-  );
-}
-
-/**
- * Pre-create a fixed tick array account at the correct PDA.
- *
- * Layout (packed, C repr, after 8-byte discriminator):
- *   pool_id:                 Pubkey  (32 bytes)  offset 8
- *   start_tick_index:        i32     (4 bytes)   offset 40
- *   ticks:                   [TickState; 60]     offset 44  (168*60 = 10080 bytes)
- *   initialized_tick_count:  u8      (1 byte)    offset 10124
- *   recent_epoch:            u64     (8 bytes)   offset 10125
- *   padding:                 [u8; 107]           offset 10133
- *
- * Uses the bankrun rent sysvar to compute the exact rent-exempt minimum
- * rather than a hardcoded approximation.
- */
-async function preCreateFixedTickArray(
-  context: ProgramTestContext,
-  poolPda: PublicKey,
-  startTickIndex: number,
-): Promise<PublicKey> {
-  const pda = getTickArrayPda(poolPda, startTickIndex);
-  const data = Buffer.alloc(FIXED_TICK_ARRAY_LEN);
-
-  // Write discriminator
-  FIXED_TICK_ARRAY_DISCRIMINATOR.copy(data, 0);
-
-  // Write pool_id (32 bytes at offset 8)
-  poolPda.toBuffer().copy(data, 8);
-
-  // Write start_tick_index (i32 LE at offset 40)
-  data.writeInt32LE(startTickIndex, 40);
-
-  // Everything else (ticks, init_count, padding) stays zeroed — correct for
-  // uninitialized ticks (liquidity_gross=0, not initialized).
-
-  // Compute rent-exempt minimum from the actual bankrun rent sysvar,
-  // not a hardcoded approximation — ensures the account is always valid
-  // regardless of cluster rent configuration.
-  const rent = await context.banksClient.getRent();
-  const lamports = Number(rent.minimumBalance(BigInt(FIXED_TICK_ARRAY_LEN)));
-
-  context.setAccount(pda, {
-    lamports,
-    data,
-    owner: PROGRAM_ID,
-    executable: false,
-  });
-
-  return pda;
-}
+// preCreateFixedTickArray, FIXED_TICK_ARRAY_LEN, and FIXED_TICK_ARRAY_DISCRIMINATOR
+// are imported from ../helpers/init-utils.
 
 describe("fixed tick array — parity regression", () => {
   /**
@@ -2926,5 +2850,150 @@ describe("edge cases — pre-audit coverage", () => {
     // 14) Position still exists
     const posAfterDecrease = await context.banksClient.getAccount(position.personalPosition);
     expect(posAfterDecrease).not.toBeNull();
+  });
+});
+
+describe("dynamic tick array — rent & lamport economics", () => {
+  /**
+   * PAYER IS CHARGED EXACT RENT DIFFERENCE ON ARRAY EXPANSION
+   *
+   * Open position A at [100, 200) → tick array [0, 600) is created (344 bytes).
+   * Open position B at [300, 400) in the SAME array → grows by +224 bytes.
+   *
+   * Verifies:
+   *   1. Array grew by exactly 224 bytes
+   *   2. Array lamports increased by exactly rent(new_size) − rent(old_size)
+   *   3. Array lamports == rent.minimumBalance(new_size) — no overpayment
+   *   4. Payer SOL decreased by at least the rent delta
+   */
+  it("should charge payer exact rent difference on array expansion", async () => {
+    const context = await startBankrun();
+    fundAdmin(context);
+    const ammConfig = await createAmmConfig(context, 0, 10);
+    let mintKeypairA = Keypair.generate();
+    let mintKeypairB = Keypair.generate();
+    await createMint(context, mintKeypairA, 6);
+    await createMint(context, mintKeypairB, 6);
+    const [mint0, mint1] =
+      mintKeypairA.publicKey.toBuffer().compare(mintKeypairB.publicKey.toBuffer()) < 0
+        ? [mintKeypairA.publicKey, mintKeypairB.publicKey]
+        : [mintKeypairB.publicKey, mintKeypairA.publicKey];
+    const sqrtPriceX64 = new BN("18446744073709551616");
+    const pool = await createPool(context, ammConfig, mint0, mint1, sqrtPriceX64);
+    const userAta0 = await createAndMintTo(context, mint0, context.payer.publicKey, 1_000_000_000_000n);
+    const userAta1 = await createAndMintTo(context, mint1, context.payer.publicKey, 1_000_000_000_000n);
+
+    const tickSpacing = 10;
+
+    // Position A: ticks 100 and 200 — creates tick array [0, 600) with 2 ticks
+    await openPosition(
+      context, pool.poolPda, mint0, mint1, pool.vault0, pool.vault1, userAta0, userAta1,
+      100, 200, tickSpacing, new BN(100_000), new BN(1_000_000_000), new BN(1_000_000_000),
+    );
+
+    const tickArray0 = getTickArrayPda(pool.poolPda, 0);
+    const arrayAfterA = await context.banksClient.getAccount(tickArray0);
+    expect(arrayAfterA).not.toBeNull();
+    const sizeAfterA = arrayAfterA!.data.length;
+    const lamportsAfterA = BigInt(arrayAfterA!.lamports);
+    expect(sizeAfterA).toBe(MIN_LEN + 2 * DYNAMIC_TICK_DATA_LEN); // 344
+
+    const payerBefore = await context.banksClient.getAccount(context.payer.publicKey);
+    const payerLamportsBefore = BigInt(payerBefore!.lamports);
+
+    // Position B: ticks 300 and 400 — same tick array grows by +224 bytes
+    await openPosition(
+      context, pool.poolPda, mint0, mint1, pool.vault0, pool.vault1, userAta0, userAta1,
+      300, 400, tickSpacing, new BN(100_000), new BN(1_000_000_000), new BN(1_000_000_000),
+    );
+
+    const arrayAfterB = await context.banksClient.getAccount(tickArray0);
+    expect(arrayAfterB).not.toBeNull();
+    const sizeAfterB = arrayAfterB!.data.length;
+    const lamportsAfterB = BigInt(arrayAfterB!.lamports);
+
+    // 1) Grew by exactly 224 bytes
+    expect(sizeAfterB - sizeAfterA).toBe(2 * DYNAMIC_TICK_DATA_LEN);
+    expect(sizeAfterB).toBe(MIN_LEN + 4 * DYNAMIC_TICK_DATA_LEN); // 568
+
+    // 2) Exact rent delta transferred
+    const rent = await context.banksClient.getRent();
+    const rentForOldSize = rent.minimumBalance(BigInt(sizeAfterA));
+    const rentForNewSize = rent.minimumBalance(BigInt(sizeAfterB));
+    const expectedRentDelta = rentForNewSize - rentForOldSize;
+    expect(lamportsAfterB - lamportsAfterA).toBe(expectedRentDelta);
+
+    // 3) Exactly rent-exempt, no overpayment
+    expect(lamportsAfterB).toBe(rentForNewSize);
+
+    // 4) Payer spent at least the rent delta
+    const payerAfter = await context.banksClient.getAccount(context.payer.publicKey);
+    const payerLamportsAfter = BigInt(payerAfter!.lamports);
+    expect(payerLamportsBefore - payerLamportsAfter).toBeGreaterThanOrEqual(expectedRentDelta);
+  });
+
+  /**
+   * TX FAILS CLEANLY WHEN USER HAS GAS BUT NOT ENOUGH FOR REALLOC RENT
+   *
+   * Open position A at [100, 200) → tick array created (344 bytes).
+   * Drain payer to 100,000 lamports (enough for tx fee, not enough for ~1.56M rent delta).
+   * Attempt position B at [300, 400) in same array — should fail.
+   *
+   * Verifies:
+   *   1. Transaction is rejected
+   *   2. Tick array size and lamports unchanged (tx rolled back)
+   */
+  it("should fail cleanly when payer lacks rent for realloc", async () => {
+    const context = await startBankrun();
+    fundAdmin(context);
+    const ammConfig = await createAmmConfig(context, 0, 10);
+    let mintKeypairA = Keypair.generate();
+    let mintKeypairB = Keypair.generate();
+    await createMint(context, mintKeypairA, 6);
+    await createMint(context, mintKeypairB, 6);
+    const [mint0, mint1] =
+      mintKeypairA.publicKey.toBuffer().compare(mintKeypairB.publicKey.toBuffer()) < 0
+        ? [mintKeypairA.publicKey, mintKeypairB.publicKey]
+        : [mintKeypairB.publicKey, mintKeypairA.publicKey];
+    const sqrtPriceX64 = new BN("18446744073709551616");
+    const pool = await createPool(context, ammConfig, mint0, mint1, sqrtPriceX64);
+    const userAta0 = await createAndMintTo(context, mint0, context.payer.publicKey, 1_000_000_000_000n);
+    const userAta1 = await createAndMintTo(context, mint1, context.payer.publicKey, 1_000_000_000_000n);
+
+    const tickSpacing = 10;
+
+    // Position A: creates tick array [0, 600) with 2 initialized ticks
+    await openPosition(
+      context, pool.poolPda, mint0, mint1, pool.vault0, pool.vault1, userAta0, userAta1,
+      100, 200, tickSpacing, new BN(100_000), new BN(1_000_000_000), new BN(1_000_000_000),
+    );
+
+    const tickArray0 = getTickArrayPda(pool.poolPda, 0);
+    const arrayBefore = await context.banksClient.getAccount(tickArray0);
+    expect(arrayBefore).not.toBeNull();
+    const sizeBefore = arrayBefore!.data.length;
+    const lamportsBefore = arrayBefore!.lamports;
+
+    // Drain payer — leave only 100,000 lamports
+    context.setAccount(context.payer.publicKey, {
+      lamports: 100_000,
+      data: Buffer.alloc(0),
+      owner: SystemProgram.programId,
+      executable: false,
+    });
+
+    // Position B should fail — payer can't cover rent transfer
+    await expect(
+      openPosition(
+        context, pool.poolPda, mint0, mint1, pool.vault0, pool.vault1, userAta0, userAta1,
+        300, 400, tickSpacing, new BN(100_000), new BN(1_000_000_000), new BN(1_000_000_000),
+      )
+    ).rejects.toThrow();
+
+    // Tick array unchanged — failed tx rolled back
+    const arrayAfter = await context.banksClient.getAccount(tickArray0);
+    expect(arrayAfter).not.toBeNull();
+    expect(arrayAfter!.data.length).toBe(sizeBefore);
+    expect(arrayAfter!.lamports).toBe(lamportsBefore);
   });
 });

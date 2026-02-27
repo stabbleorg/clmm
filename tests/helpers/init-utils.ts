@@ -650,3 +650,55 @@ export async function swapV2(
 
   await client.processTransaction(tx);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fixed tick array helpers
+//
+// Anchor discriminator: sha256("account:TickArrayState")[0..8]
+// Layout (from fixed_tick_array.rs):
+//   discriminator:          8  bytes  offset 0
+//   pool_id:               32  bytes  offset 8
+//   start_tick_index:       4  bytes  offset 40
+//   ticks [TickState; 60]: 10080 bytes offset 44  (168 * 60)
+//   initialized_tick_count: 1  byte   offset 10124
+//   recent_epoch + padding:115  bytes  offset 10125
+//   TOTAL:              10240  bytes
+// ─────────────────────────────────────────────────────────────────────────────
+export const FIXED_TICK_ARRAY_DISCRIMINATOR = Buffer.from([192, 155, 85, 205, 49, 249, 129, 42]);
+export const FIXED_TICK_ARRAY_LEN = 8 + 32 + 4 + 168 * 60 + 1 + 115; // = 10240
+
+/**
+ * Pre-create a fixed tick array account at the correct PDA using bankrun's
+ * setAccount. This forces the program to treat it as a FixedTickArray
+ * (discriminator-based type detection) instead of creating a DynamicTickArray
+ * on demand when openPosition is called.
+ *
+ * All tick slots are zeroed — no ticks are initialized. openPosition will
+ * initialize the ticks it needs in-place (fixed arrays never realloc).
+ */
+export async function preCreateFixedTickArray(
+  context: ProgramTestContext,
+  poolPda: PublicKey,
+  startTickIndex: number,
+): Promise<PublicKey> {
+  const pda = getTickArrayPda(poolPda, startTickIndex);
+  const data = Buffer.alloc(FIXED_TICK_ARRAY_LEN);
+
+  FIXED_TICK_ARRAY_DISCRIMINATOR.copy(data, 0);  // offset 0:  discriminator
+  poolPda.toBuffer().copy(data, 8);              // offset 8:  pool_id
+  data.writeInt32LE(startTickIndex, 40);          // offset 40: start_tick_index
+
+  // All tick slots stay zeroed — liquidity_gross=0, not initialized.
+
+  const rent = await context.banksClient.getRent();
+  const lamports = Number(rent.minimumBalance(BigInt(FIXED_TICK_ARRAY_LEN)));
+
+  context.setAccount(pda, {
+    lamports,
+    data,
+    owner: PROGRAM_ID,
+    executable: false,
+  });
+
+  return pda;
+}
