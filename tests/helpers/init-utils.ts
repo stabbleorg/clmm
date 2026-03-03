@@ -6,6 +6,7 @@ import {
   Transaction,
   TransactionInstruction,
   SystemProgram,
+  ComputeBudgetProgram,
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import {
@@ -339,7 +340,7 @@ export async function openPosition(
   // i32 tick_array_lower_start_index, i32 tick_array_upper_start_index,
   // u128 liquidity, u64 amount_0_max, u64 amount_1_max,
   // bool with_metadata, Option<bool> base_flag
-  const withMetadata = false;
+  const withMetadata = true;
   const data = Buffer.alloc(8 + 4 + 4 + 4 + 4 + 16 + 8 + 8 + 1 + 2);
   let offset = 0;
 
@@ -587,7 +588,8 @@ export async function swapV2(
   isBaseInput: boolean,
   zeroForOne: boolean,
   tickArrayPdas: PublicKey[],
-): Promise<void> {
+  computeUnitLimit?: number,
+): Promise<bigint> {
   const client = context.banksClient;
   const payer = context.payer;
 
@@ -656,12 +658,16 @@ export async function swapV2(
   });
 
   const tx = new Transaction();
+  if (computeUnitLimit) {
+    tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }));
+  }
   tx.add(ix);
   tx.recentBlockhash = context.lastBlockhash;
   tx.feePayer = payer.publicKey;
   tx.sign(payer);
 
-  await client.processTransaction(tx);
+  const meta = await client.processTransaction(tx);
+  return meta.computeUnitsConsumed;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -714,4 +720,38 @@ export async function preCreateFixedTickArray(
   });
 
   return pda;
+}
+
+export async function closePosition(                                                                                                    
+  context: ProgramTestContext,                                                                                                          
+  positionNftMint: PublicKey,                                                                                                           
+  positionNftAccount: PublicKey,                                                                                                        
+  personalPosition: PublicKey,                                                                                                          
+): Promise<void> {                                                                                                                      
+  const client = context.banksClient;                                                                                                   
+  const payer = context.payer;                                                                                                          
+                                                                                                                                        
+  // close_position discriminator from IDL
+  const discriminator = Buffer.from([123, 134, 81, 0, 49, 68, 98, 98]);                                                                 
+
+  const ix = new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [
+      { pubkey: payer.publicKey, isSigner: true, isWritable: true },     // nft_owner
+      { pubkey: positionNftMint, isSigner: false, isWritable: true },    // position_nft_mint
+      { pubkey: positionNftAccount, isSigner: false, isWritable: true }, // position_nft_account
+      { pubkey: personalPosition, isSigner: false, isWritable: true },   // personal_position
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
+      { pubkey: TOKEN_PROGRAM_2022_ID, isSigner: false, isWritable: false },   // token_program (T22 for NFT)
+    ],
+    data: discriminator,
+  });
+
+  const tx = new Transaction();
+  tx.add(ix);
+  tx.recentBlockhash = context.lastBlockhash;
+  tx.feePayer = payer.publicKey;
+  tx.sign(payer);
+
+  await client.processTransaction(tx);
 }
