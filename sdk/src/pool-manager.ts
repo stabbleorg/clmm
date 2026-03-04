@@ -40,7 +40,11 @@ import Decimal from "decimal.js";
 import { getToken } from "./utils/token";
 
 export class PoolManager {
-  constructor(private readonly config: ClmmSdkConfig) {}
+  private readonly programId: Address;
+
+  constructor(private readonly config: ClmmSdkConfig) {
+    this.programId = config.programAddress ?? STABBLE_CLMM_PROGRAM_ID;
+  }
 
   /**
    * Make create pool instructions
@@ -102,13 +106,14 @@ export class PoolManager {
       ammConfigId,
       token0,
       token1,
+      this.programId,
     );
-    const [observationPda] = await PdaUtils.getObservationStatePda(poolPda);
+    const [observationPda] = await PdaUtils.getObservationStatePda(poolPda, this.programId);
     const [tickArrayBitmapPda] =
-      await PdaUtils.getTickArrayBitmapExtensionPda(poolPda);
+      await PdaUtils.getTickArrayBitmapExtensionPda(poolPda, this.programId);
 
-    const [tokenVault0] = await PdaUtils.getPoolVaultIdPda(poolPda, token0);
-    const [tokenVault1] = await PdaUtils.getPoolVaultIdPda(poolPda, token1);
+    const [tokenVault0] = await PdaUtils.getPoolVaultIdPda(poolPda, token0, this.programId);
+    const [tokenVault1] = await PdaUtils.getPoolVaultIdPda(poolPda, token1, this.programId);
 
     // Create instruction
     const instruction = await getCreatePoolInstructionAsync({
@@ -171,7 +176,7 @@ export class PoolManager {
     } = params;
 
     // Derive AMM config PDA
-    const ammConfigPda = await PdaUtils.getAmmConfigPda(index);
+    const ammConfigPda = await PdaUtils.getAmmConfigPda(index, this.programId);
 
     const instruction = getCreateAmmConfigInstruction({
       owner,
@@ -233,11 +238,12 @@ export class PoolManager {
     tokenB: Address,
     ammConfigIndex: number = 0,
   ): Promise<PoolInfo | null> {
-    const ammConfigPda = await PdaUtils.getAmmConfigPda(ammConfigIndex);
+    const ammConfigPda = await PdaUtils.getAmmConfigPda(ammConfigIndex, this.programId);
     const poolPda = await PdaUtils.getPoolStatePda(
       ammConfigPda[0],
       tokenA,
       tokenB,
+      this.programId,
     );
 
     return this.getPool(poolPda[0]);
@@ -248,7 +254,7 @@ export class PoolManager {
   ): Promise<Account<PoolState>[]> {
     try {
       let accounts = await rpc
-        .getProgramAccounts(STABBLE_CLMM_PROGRAM_ID, {
+        .getProgramAccounts(this.programId, {
           commitment: "finalized",
           encoding: "base64",
           filters: [

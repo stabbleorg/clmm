@@ -54,14 +54,18 @@ import {
   getTransferSolInstruction,
   getCreateAccountInstruction,
 } from "@solana-program/system";
-import { SYSTEM_PROGRAM_ID } from "./constants";
+import { STABBLE_CLMM_PROGRAM_ID, SYSTEM_PROGRAM_ID } from "./constants";
 
 // Token account size in bytes (standard SPL token account)
 const TOKEN_ACCOUNT_SIZE = 165n;
 import Decimal from "decimal.js";
 
 export class PositionManager {
-  constructor(private readonly config: ClmmSdkConfig) {}
+  private readonly programId: Address;
+
+  constructor(private readonly config: ClmmSdkConfig) {
+    this.programId = config.programAddress ?? STABBLE_CLMM_PROGRAM_ID;
+  }
 
   private buildWrapSolInstructions(params: {
     payer: TransactionSigner;
@@ -221,6 +225,7 @@ export class PositionManager {
     // Derive position state PDA
     const [positionStatePda] = await PdaUtils.getPositionStatePda(
       nftMintAccount.address,
+      this.programId,
     );
 
     // Get metadata PDA
@@ -238,6 +243,7 @@ export class PositionManager {
       poolAccount.address,
       tickLower,
       tickUpper,
+      this.programId,
     );
 
     const instruction = await getOpenPositionWithToken22NftInstructionAsync({
@@ -345,16 +351,19 @@ export class PositionManager {
     const [tickArrayLower] = await PdaUtils.getTickArrayStatePda(
       poolAccount.address,
       tickArrayLowerStartIndex,
+      this.programId,
     );
 
     const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
       poolAccount.address,
       tickArrayUpperStartIndex,
+      this.programId,
     );
 
     // Derive position state PDA
     const [positionStatePda] = await PdaUtils.getPositionStatePda(
       nftMintAccount.address,
+      this.programId,
     );
 
     // Get metadata PDA
@@ -372,6 +381,7 @@ export class PositionManager {
       poolAccount.address,
       tickLower,
       tickUpper,
+      this.programId,
     );
 
     // Determine amounts based on base token
@@ -384,7 +394,7 @@ export class PositionManager {
     );
 
     const extBitmapAccount = isOverflow
-      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolAccount.address)
+      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolAccount.address, this.programId)
       : undefined;
 
     const remAccounts: AccountMeta[] = extBitmapAccount
@@ -484,6 +494,7 @@ export class PositionManager {
 
     const [personalPosition] = await PdaUtils.getPositionStatePda(
       ownerPosition.nftMint,
+      this.programId,
     );
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.nftMint,
@@ -496,6 +507,7 @@ export class PositionManager {
       poolState.address,
       ownerPosition.tickLowerIndex,
       ownerPosition.tickUpperIndex,
+      this.programId,
     );
 
     // Get tick arrays for lower and upper ticks
@@ -505,6 +517,7 @@ export class PositionManager {
         ownerPosition.tickLowerIndex,
         poolState.data.tickSpacing,
       ),
+      this.programId,
     );
 
     const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
@@ -513,6 +526,7 @@ export class PositionManager {
         ownerPosition.tickUpperIndex,
         poolState.data.tickSpacing,
       ),
+      this.programId,
     );
 
     const isOverflow = PoolUtils.isOverflowDefaultTickArrayBitmap(
@@ -521,7 +535,7 @@ export class PositionManager {
     );
 
     const extBitmapAccount = isOverflow
-      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolState.address)
+      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolState.address, this.programId)
       : undefined;
 
     const remAccounts: AccountMeta[] = extBitmapAccount
@@ -601,6 +615,7 @@ export class PositionManager {
 
     const [personalPosition] = await PdaUtils.getPositionStatePda(
       ownerPosition.nftMint,
+      this.programId,
     );
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.nftMint,
@@ -613,6 +628,7 @@ export class PositionManager {
       poolState.address,
       ownerPosition.tickLowerIndex,
       ownerPosition.tickUpperIndex,
+      this.programId,
     );
 
     // Get tick arrays for lower and upper ticks
@@ -622,6 +638,7 @@ export class PositionManager {
         ownerPosition.tickLowerIndex,
         poolState.data.tickSpacing,
       ),
+      this.programId,
     );
 
     const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
@@ -630,6 +647,7 @@ export class PositionManager {
         ownerPosition.tickUpperIndex,
         poolState.data.tickSpacing,
       ),
+      this.programId,
     );
 
     const isOverflow = PoolUtils.isOverflowDefaultTickArrayBitmap(
@@ -638,7 +656,7 @@ export class PositionManager {
     );
 
     const extBitmapAccount = isOverflow
-      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolState.address)
+      ? await PdaUtils.getTickArrayBitmapExtensionPda(poolState.address, this.programId)
       : undefined;
 
     const remAccounts: AccountMeta[] = extBitmapAccount
@@ -749,6 +767,7 @@ export class PositionManager {
 
     const [personalPosition] = await PdaUtils.getPositionStatePda(
       ownerPosition.nftMint,
+      this.programId,
     );
     const [positionNftAccount] = await findAssociatedTokenPda({
       mint: ownerPosition.nftMint,
@@ -782,7 +801,7 @@ export class PositionManager {
     positionMint: Address,
   ): Promise<PersonalPositionState | null> {
     try {
-      const positionStatePda = await PdaUtils.getPositionStatePda(positionMint);
+      const positionStatePda = await PdaUtils.getPositionStatePda(positionMint, this.programId);
       const positionState = await fetchMaybePersonalPositionState(
         this.config.rpc,
         positionStatePda[0],
@@ -993,6 +1012,7 @@ export class PositionManager {
         position.tickLowerIndex,
         pool.tickSpacing,
       ),
+      this.programId,
     );
 
     const [tickArrayUpper] = await PdaUtils.getTickArrayStatePda(
@@ -1001,6 +1021,7 @@ export class PositionManager {
         position.tickUpperIndex,
         pool.tickSpacing,
       ),
+      this.programId,
     );
 
     const tickArrayLowerAccount = await fetchMaybeTickArrayState(
