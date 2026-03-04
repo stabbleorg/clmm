@@ -7,6 +7,7 @@ use anchor_spl::token_interface::{Mint, Token2022, TokenAccount};
 #[derive(Accounts)]
 pub struct IncreaseLiquidityV2<'info> {
     /// Pays to mint the position
+    #[account(mut)]
     pub nft_owner: Signer<'info>,
 
     /// The token account for nft
@@ -29,10 +30,12 @@ pub struct IncreaseLiquidityV2<'info> {
 
     /// Stores init state for the lower tick
     /// CHECK: can be both fixed or dynamic
+    #[account(mut)]
     pub tick_array_lower: UncheckedAccount<'info>,
 
     /// Stores init state for the upper tick
     /// CHECK: can be both fixed or dynamic
+    #[account(mut)]
     pub tick_array_upper: UncheckedAccount<'info>,
 
     /// The payer's token account for token_0
@@ -89,6 +92,7 @@ pub struct IncreaseLiquidityV2<'info> {
     //     bump
     // )]
     // pub tick_array_bitmap: AccountLoader<'info, TickArrayBitmapExtension>,
+    pub system_program: Program<'info, System>
 }
 
 pub fn increase_liquidity_v2<'a, 'b, 'c: 'info, 'info>(
@@ -100,6 +104,7 @@ pub fn increase_liquidity_v2<'a, 'b, 'c: 'info, 'info>(
 ) -> Result<()> {
     increase_liquidity(
         &ctx.accounts.nft_owner,
+        &ctx.accounts.system_program,
         &ctx.accounts.pool_state,
         &mut ctx.accounts.personal_position,
         &ctx.accounts.tick_array_lower,

@@ -2,11 +2,12 @@ use crate::error::ErrorCode;
 use crate::libraries::liquidity_math;
 use crate::libraries::tick_math;
 use crate::states::*;
-use crate::states::tick_array::{check_tick_array_start_index, check_ticks_order};
+use crate::states::tick_array::{check_tick_array_start_index, check_ticks_order, TickArrayRealloc};
 use crate::states::tick_array::load_tick_array_mut;
 use crate::util::*;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program;
+use anchor_lang::system_program;
 use anchor_lang::system_program::{transfer, Transfer};
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::metadata::{
@@ -26,7 +27,6 @@ use std::cell::RefMut;
 #[cfg(feature = "enable-log")]
 use std::convert::identity;
 use std::ops::Deref;
-use anchor_lang::solana_program::system_program;
 use crate::instructions::modify_position;
 use arrayref::array_ref;
 
@@ -123,6 +123,7 @@ pub fn open_position<'a, 'b, 'c: 'info, 'info>(
             ..
         } = add_liquidity(
             payer,
+            system_program,
             token_account_0,
             token_account_1,
             token_vault_0,
@@ -208,11 +209,13 @@ pub struct LiquidityChangeResult {
     pub fee_growth_inside_0_x64: u128,
     pub fee_growth_inside_1_x64: u128,
     pub reward_growths_inside: [u128; 3],
+    pub tick_array_realloc: TickArrayRealloc
 }
 
 /// Add liquidity to an initialized pool
 pub fn add_liquidity<'b, 'c: 'info, 'info>(
     payer: &'b Signer<'info>,
+    system_program: &'b Program<'info, System>,
     token_account_0: &'b AccountInfo<'info>,
     token_account_1: &'b AccountInfo<'info>,
     token_vault_0: &'b AccountInfo<'info>,
@@ -287,24 +290,31 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
     let is_same_array = tick_array_lower_info.key() == tick_array_upper_info.key();
     
     // Capture array information before moving into modify_position
-    let (lower_is_variable_size, lower_start_tick_index, upper_is_variable_size, upper_start_tick_index) = {
+    let (lower_is_variable_size, lower_start_tick_index, upper_is_variable_size, upper_start_tick_index, lower_count_before, upper_count_before) = {
         let (tick_lower_array, tick_upper_array) = tick_arrays.get_mut_refs();
         require_keys_eq!(tick_lower_array.pool(), pool_state.key());
         if let Some(upper_array) = tick_upper_array.as_ref() {
             require_keys_eq!(upper_array.pool(), pool_state.key());
         }
-        
+
         let lower_is_variable = tick_lower_array.is_variable_size();
         let lower_start = tick_lower_array.start_tick_index();
-        
-        let (upper_is_variable, upper_start) = if is_same_array {
-            (lower_is_variable, lower_start)
+        let lower_count: u8 = if lower_is_variable {
+            tick_lower_array.initialized_tick_count()
+        } else {
+            0
+        };
+
+        let (upper_is_variable, upper_start, upper_count) = if is_same_array {
+            (lower_is_variable, lower_start, lower_count)
         } else {
             let upper_array_ref = tick_upper_array.as_ref().unwrap();
-            (upper_array_ref.is_variable_size(), upper_array_ref.start_tick_index())
+            let uv = upper_array_ref.is_variable_size();
+            let uc: u8 = if uv { upper_array_ref.initialized_tick_count() } else { 0 };
+            (uv, upper_array_ref.start_tick_index(), uc)
         };
-        
-        (lower_is_variable, lower_start, upper_is_variable, upper_start)
+
+        (lower_is_variable, lower_start, upper_is_variable, upper_start, lower_count, upper_count)
     };
     
     // modify_position handles tick updates via TickArrayType trait, which works with both fixed and dynamic arrays
@@ -318,42 +328,112 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
             tick_upper_array,
             tick_lower_index,
             tick_upper_index,
-            clock.unix_timestamp as u64,
-            Some(tick_array_lower_info),
-            Some(tick_array_upper_info),
+            clock.unix_timestamp as u64
         )?
     }; // Drop mutable borrows here
+    drop(tick_arrays); // Release RefMut so realloc and re-load can access the account
+
+    // Handle realloc for dynamic tick arrays (grow only)
+    // Transfer rent first, then realloc
+    if is_same_array {
+        // Both ticks in same account — combine deltas into one realloc
+        // add_liquidity only grows — shrink is impossible (liquidity always increases)
+        let mut delta: usize = 0;
+        if result.tick_array_realloc.lower_grow { delta += DynamicTickData::LEN; }
+        if result.tick_array_realloc.upper_grow { delta += DynamicTickData::LEN; }
+        if delta > 0 {
+            let new_size = tick_array_lower_info.data_len() + delta;
+            let required_lamports = Rent::get()?.minimum_balance(new_size);
+            let current_lamports = tick_array_lower_info.lamports();
+            if required_lamports > current_lamports {
+                let diff = required_lamports - current_lamports;
+                anchor_lang::system_program::transfer(
+                    CpiContext::new(
+                        system_program.to_account_info(),
+                        anchor_lang::system_program::Transfer {
+                            from: payer.to_account_info(),
+                            to: tick_array_lower_info.clone(),
+                        },
+                    ),
+                    diff,
+                )?;
+            }
+            // zero_init=false: rotate_right already wrote tick data into these bytes
+            tick_array_lower_info.realloc(new_size, false)?;
+        }
+    } else {
+        // Different accounts — handle lower and upper independently
+        if result.tick_array_realloc.lower_grow {
+            let new_size = tick_array_lower_info.data_len() + DynamicTickData::LEN;
+            let required_lamports = Rent::get()?.minimum_balance(new_size);
+            let current_lamports = tick_array_lower_info.lamports();
+            if required_lamports > current_lamports {
+                let diff = required_lamports - current_lamports;
+                anchor_lang::system_program::transfer(
+                    CpiContext::new(
+                        system_program.to_account_info(),
+                        anchor_lang::system_program::Transfer {
+                            from: payer.to_account_info(),
+                            to: tick_array_lower_info.clone(),
+                        },
+                    ),
+                    diff,
+                )?;
+            }
+            // zero_init=false: rotate_right already wrote tick data into these bytes
+            tick_array_lower_info.realloc(new_size, false)?;
+        }
+        if result.tick_array_realloc.upper_grow {
+            let new_size = tick_array_upper_info.data_len() + DynamicTickData::LEN;
+            let required_lamports = Rent::get()?.minimum_balance(new_size);
+            let current_lamports = tick_array_upper_info.lamports();
+            if required_lamports > current_lamports {
+                let diff = required_lamports - current_lamports;
+                anchor_lang::system_program::transfer(
+                    CpiContext::new(
+                        system_program.to_account_info(),
+                        anchor_lang::system_program::Transfer {
+                            from: payer.to_account_info(),
+                            to: tick_array_upper_info.clone(),
+                        },
+                    ),
+                    diff,
+                )?;
+            }
+            // zero_init=false: rotate_right already wrote tick data into these bytes
+            tick_array_upper_info.realloc(new_size, false)?;
+        }
+    }
 
     // Handle tick array bitmap updates when ticks are flipped
     // Now safe to load arrays again since previous borrows are dropped
     if result.tick_lower_flipped {
-        // For fixed arrays, update initialized_tick_count and get the new count
-        let after_init_tick_count = if !lower_is_variable_size {
-            // It's a fixed array, load it as FixedTickArray and update the count
+        if !lower_is_variable_size {
+            // Fixed array: update stored counter and check
             let fixed_loader = AccountLoad::<FixedTickArray>::try_from_unchecked(
                 &crate::id(),
                 tick_array_lower_info,
             )?;
             let count = fixed_loader.load_mut()?.update_initialized_tick_count(true)?;
-            count
+            if count == 1 {
+                pool_state.flip_tick_array_bit(
+                    tick_array_bitmap_extension,
+                    lower_start_tick_index,
+                )?;
+            }
         } else {
-            // For dynamic arrays, initialized_tick_count is computed from bitmap
-            let tick_array = load_tick_array_mut(tick_array_lower_info, &pool_state.key())?;
-            tick_array.initialized_tick_count()
-        };
-
-        if after_init_tick_count == 1 {
-            // This was the first tick initialized in the array
-            pool_state.flip_tick_array_bit(
-                tick_array_bitmap_extension,
-                lower_start_tick_index,
-            )?;
+            // Dynamic array: array was empty before → flip pool bit ON (once)
+            if lower_count_before == 0 {
+                pool_state.flip_tick_array_bit(
+                    tick_array_bitmap_extension,
+                    lower_start_tick_index,
+                )?;
+            }
         }
     }
     if result.tick_upper_flipped {
-        // For fixed arrays, update initialized_tick_count and get the new count
-        let after_init_tick_count = if !upper_is_variable_size {
-            // It's a fixed array, load it as FixedTickArray and update the count
+        if !upper_is_variable_size {
+            // Fixed array: update stored counter and check
             let tick_array_info = if is_same_array {
                 tick_array_lower_info
             } else {
@@ -364,25 +444,22 @@ pub fn add_liquidity<'b, 'c: 'info, 'info>(
                 tick_array_info,
             )?;
             let count = fixed_loader.load_mut()?.update_initialized_tick_count(true)?;
-            count
-        } else {
-            // For dynamic arrays, initialized_tick_count is computed from bitmap
-            let tick_array_info = if is_same_array {
-                tick_array_lower_info
-            } else {
-                tick_array_upper_info
-            };
-            let tick_array = load_tick_array_mut(tick_array_info, &pool_state.key())?;
-            tick_array.initialized_tick_count()
-        };
-
-        if after_init_tick_count == 1 {
-            // This was the first tick initialized in the array
-            pool_state.flip_tick_array_bit(
-                tick_array_bitmap_extension,
-                upper_start_tick_index,
-            )?;
+            if count == 1 {
+                pool_state.flip_tick_array_bit(
+                    tick_array_bitmap_extension,
+                    upper_start_tick_index,
+                )?;
+            }
+        } else if !is_same_array {
+            // Dynamic array in a DIFFERENT array: check if that array was empty before
+            if upper_count_before == 0 {
+                pool_state.flip_tick_array_bit(
+                    tick_array_bitmap_extension,
+                    upper_start_tick_index,
+                )?;
+            }
         }
+        // Dynamic same-array: skip — already handled by lower tick's check above
     }
 
     let amount_0 = result.amount_0;
