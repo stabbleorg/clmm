@@ -18,6 +18,7 @@ client = []
 no-log-ix-name = []
 enable-log = []
 devnet = []
+qas = []
 paramset = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
