@@ -26,7 +26,7 @@ import type {
   MakeInstructionResult,
   PositionInfo,
 } from "./types";
-import { ClmmError, ClmmErrorCode } from "./types";
+import { ClmmError, ClmmErrorCode, EnrichedPositionsResult } from "./types";
 import {
   getSyncNativeInstruction,
   findAssociatedTokenPda,
@@ -896,11 +896,13 @@ export class PositionManager {
   }
 
   /**
-   * Get all positions for a wallet
+   * Get raw positions for a wallet (without pool-state enrichment)
    * @param wallet - Wallet address
-   * @returns Array of positions owned by the wallet
+   * @returns Array of raw position states owned by the wallet
    */
-  async getPositionsForWallet(wallet: Address): Promise<PositionInfo[]> {
+  async getRawPositionsForWallet(
+    wallet: Address,
+  ): Promise<PersonalPositionState[]> {
     try {
       // Fetch Token-2022 accounts
       const response22 = await this.config.rpc
@@ -928,52 +930,69 @@ export class PositionManager {
         ),
       );
 
-      const validPositions = positions.filter(
-        (p) => !!p,
-      ) as PersonalPositionState[];
-
-      // Fetch pool data for each position and enrich
-      const enrichedPositions = await Promise.all(
-        validPositions.map(async (position) => {
-          try {
-            // Fetch pool state for this position
-            const poolAccount = await fetchMaybePoolState(
-              this.config.rpc,
-              position.poolId,
-              { commitment: this.config.commitment },
-            );
-
-            if (!poolAccount.exists) {
-              console.warn(`Pool ${position.poolId} not found for position`);
-              return null;
-            }
-
-            const { fees, rewards } = await this.getPositionFeeAndRewards(
-              position,
-              poolAccount.data,
-            );
-
-            // Enrich position with pool data
-            return this.enrichPositionInfo(
-              position,
-              poolAccount.data,
-              fees,
-              rewards,
-            );
-          } catch (error) {
-            console.error(`Failed to enrich position: ${error}`);
-            return null;
-          }
-        }),
-      );
-
-      return enrichedPositions.filter((p) => !!p) as PositionInfo[];
+      return positions.filter((p) => !!p) as PersonalPositionState[];
     } catch (error) {
       throw new ClmmError(
         ClmmErrorCode.POSITION_NOT_FOUND,
         `Failed to fetch positions for user: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     }
+  }
+
+  /**
+   * Get all positions for a wallet, enriched with pool data
+   * @param wallet - Wallet address
+   * @returns Structured result with enriched positions and any failures
+   */
+  async getPositionsForWallet(
+    wallet: Address,
+  ): Promise<EnrichedPositionsResult> {
+    const rawPositions = await this.getRawPositionsForWallet(wallet);
+
+    const results = await Promise.allSettled(
+      rawPositions.map(async (position) => {
+        const poolAccount = await fetchMaybePoolState(
+          this.config.rpc,
+          position.poolId,
+          { commitment: this.config.commitment },
+        );
+
+        if (!poolAccount.exists) {
+          throw new Error(`Pool ${position.poolId} not found for position`);
+        }
+
+        const { fees, rewards } = await this.getPositionFeeAndRewards(
+          position,
+          poolAccount.data,
+        );
+
+        return this.enrichPositionInfo(
+          position,
+          poolAccount.data,
+          fees,
+          rewards,
+        );
+      }),
+    );
+
+    const positions: PositionInfo[] = [];
+    const failed: EnrichedPositionsResult["failed"] = [];
+
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        positions.push(result.value);
+      } else {
+        failed.push({
+          position: rawPositions[index],
+          error:
+            result.reason instanceof Error
+              ? result.reason
+              : new Error(String(result.reason)),
+        });
+      }
+    });
+
+    return { positions, failed };
   }
 
   /**

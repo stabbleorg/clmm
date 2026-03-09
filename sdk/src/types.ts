@@ -122,6 +122,14 @@ export interface ClmmConfig {
   protocolFeeRate: number;
 }
 
+// Position Fetching Result Types
+export interface EnrichedPositionsResult {
+  /** Successfully enriched positions */
+  positions: PositionInfo[];
+  /** Positions that failed enrichment (e.g. transient RPC errors) */
+  failed: Array<{ position: PersonalPositionState; error: Error }>;
+}
+
 // Position Management Types
 export interface PositionInfo extends PersonalPositionState {
   /** Token mint addresses from pool */
@@ -354,7 +362,7 @@ export class ClmmError extends Error {
   constructor(
     public code: ClmmErrorCode,
     message: string,
-    public details?: unknown
+    public details?: unknown,
   ) {
     super(message);
     this.name = "ClmmError";
