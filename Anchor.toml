@@ -4,10 +4,10 @@ anchor_version = "0.31.1"
 
 [features]
 seeds = false
-devnet = true
+devnet = false
 
 [programs.localnet]
-amm_v3 = "6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6"
+amm_v3 = "B7STfA7vKq3nN7sP5uQo1gr5SQySUyC443wDuCR65Exe"
 
 [programs.devnet]
 amm_v3 = "6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6"

@@ -17,6 +17,7 @@ import {
   PdaUtils,
 } from "./utils";
 
+import { STABBLE_CLMM_PROGRAM_ID } from "./constants";
 import Decimal from "decimal.js";
 
 /**
@@ -35,7 +36,11 @@ export interface InstructionResult<T = {}> {
  * Core CLMM class providing high-level operations
  */
 export class Clmm {
-  constructor(private readonly config: ClmmSdkConfig) { }
+  private readonly programId: Address;
+
+  constructor(private readonly config: ClmmSdkConfig) {
+    this.programId = config.programAddress ?? STABBLE_CLMM_PROGRAM_ID;
+  }
 
   /**
    * Create a new AMM configuration
@@ -68,7 +73,7 @@ export class Clmm {
     } = params;
 
     // Derive AMM config PDA
-    const ammConfigPda = await PdaUtils.getAmmConfigPda(index);
+    const ammConfigPda = await PdaUtils.getAmmConfigPda(index, this.programId);
 
     const instruction = await getCreateAmmConfigInstructionAsync({
       owner,

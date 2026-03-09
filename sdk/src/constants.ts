@@ -9,6 +9,8 @@ import { fetchAllAmmConfig } from "./generated";
 // Program addresses
 export const STABBLE_CLMM_PROGRAM_ID =
   "6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6" as Address;
+export const STABBLE_CLMM_QAS_PROGRAM_ID =
+  "8896VTm3Z3g8PuktiDdW9JLxZP1ww2r5c9Tz5AbaBjAJ" as Address;
 
 // Useful Program Address
 export const METADATA_PROGRAM_ID =

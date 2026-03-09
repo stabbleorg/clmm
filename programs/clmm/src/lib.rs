@@ -16,6 +16,10 @@ solana_security_txt::security_txt! {
     preferred_languages: "en"
 }
 
+#[cfg(feature = "qas")]
+declare_id!("8896VTm3Z3g8PuktiDdW9JLxZP1ww2r5c9Tz5AbaBjAJ");
+
+#[cfg(not(feature = "qas"))]
 declare_id!("6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6");
 pub mod admin {
     use super::{pubkey, Pubkey};

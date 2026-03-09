@@ -1,5 +1,5 @@
 import BN from "bn.js";
-import { MAX_TICK, MIN_TICK } from "../constants";
+import { MAX_TICK, MIN_TICK, STABBLE_CLMM_PROGRAM_ID } from "../constants";
 import { TICK_ARRAY_SIZE, TickUtils } from "./tick";
 import {
   fetchAllTickArrayState,
@@ -26,7 +26,8 @@ export class TickQuery {
     tickCurrent: number,
     tickSpacing: number,
     tickArrayBitmapArray: BN[],
-    exTickArrayBitmap: TickArrayBitmapExtension
+    exTickArrayBitmap: TickArrayBitmapExtension,
+    programId: Address = STABBLE_CLMM_PROGRAM_ID,
   ): Promise<{ [key: string]: Account<TickArrayState> }> {
     const tickArraysToFetch: Address[] = [];
 
@@ -46,7 +47,8 @@ export class TickQuery {
     for (let i = 0; i < startIndexArray.length; i++) {
       const [tickArrayAddress] = await PdaUtils.getTickArrayStatePda(
         poolId,
-        startIndexArray[i]
+        startIndexArray[i],
+        programId,
       );
       tickArraysToFetch.push(tickArrayAddress);
     }
@@ -124,7 +126,8 @@ export class TickQuery {
   public static async firstInitializedTickInOneArray(
     poolId: Address,
     tickArray: Account<TickArrayState>,
-    zeroForOne: boolean
+    zeroForOne: boolean,
+    programId: Address = STABBLE_CLMM_PROGRAM_ID,
   ): Promise<{
     nextTick: TickState | undefined;
     tickArrayAddress: Address;
@@ -154,7 +157,8 @@ export class TickQuery {
 
     const [tickArrayAddress] = await PdaUtils.getTickArrayStatePda(
       poolId,
-      tickArray.data.startTickIndex
+      tickArray.data.startTickIndex,
+      programId,
     );
 
     return {
@@ -179,7 +183,8 @@ export class TickQuery {
     tickArrayCache: { [key: string]: Account<TickArrayState> },
     tickIndex: number,
     tickSpacing: number,
-    zeroForOne: boolean
+    zeroForOne: boolean,
+    programId: Address = STABBLE_CLMM_PROGRAM_ID,
   ): Promise<{
     initializedTick: TickState | undefined;
     tickArrayAddress: Address | undefined;
@@ -230,7 +235,8 @@ export class TickQuery {
 
     const [tickArrayAddress] = await PdaUtils.getTickArrayStatePda(
       poolId,
-      startIndex
+      startIndex,
+      programId,
     );
 
     return {
@@ -255,7 +261,8 @@ export class TickQuery {
     tickArrayCache: { [key: string]: Account<TickArrayState> },
     tickIndex: number,
     tickSpacing: number,
-    zeroForOne: boolean
+    zeroForOne: boolean,
+    programId: Address = STABBLE_CLMM_PROGRAM_ID,
   ): Promise<{
     nextTick: TickState;
     tickArrayAddress: Address | undefined;
@@ -270,7 +277,8 @@ export class TickQuery {
       tickArrayCache,
       tickIndex,
       tickSpacing,
-      zeroForOne
+      zeroForOne,
+      programId,
     );
 
     // Keep searching in adjacent arrays if needed
@@ -296,7 +304,8 @@ export class TickQuery {
       const result = await this.firstInitializedTickInOneArray(
         poolId,
         cachedTickArray,
-        zeroForOne
+        zeroForOne,
+        programId,
       );
 
       nextTick = result.nextTick;

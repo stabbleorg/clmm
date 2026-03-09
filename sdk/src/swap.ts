@@ -32,6 +32,7 @@ import {
   PRICE_IMPACT_THRESHOLDS,
   MIN_SQRT_PRICE_X64,
   MAX_SQRT_PRICE_X64,
+  STABBLE_CLMM_PROGRAM_ID,
 } from "./constants";
 import {
   PoolDataManager,
@@ -640,6 +641,7 @@ export interface SwapManagerConfig {
  * ```
  */
 export class SwapManager {
+  private readonly programId: Address;
   private readonly poolDataManager: PoolDataManager;
   private readonly mathEngine: SwapMathEngine;
   private readonly priceApiClient?: PriceApiClient;
@@ -659,6 +661,7 @@ export class SwapManager {
     private readonly config: ClmmSdkConfig,
     private readonly managerConfig?: SwapManagerConfig
   ) {
+    this.programId = config.programAddress ?? STABBLE_CLMM_PROGRAM_ID;
     // Initialize pool data manager with production-grade caching:
     // - 2-second TTL for balance of freshness and RPC efficiency
     // - "freeze" immutability for zero-cost BigInt/BN safety
@@ -1439,7 +1442,8 @@ export class SwapManager {
 
       const [tickArrayPda] = await PdaUtils.getTickArrayStatePda(
         poolAddress,
-        startIndex
+        startIndex,
+        this.programId,
       );
       tickArrayAddresses.push(tickArrayPda);
     }
@@ -1861,7 +1865,7 @@ export class SwapManager {
     const zeroForOne = params.tokenIn === pool.tokenMint0;
 
     const [observationState] =
-      await PdaUtils.getObservationStatePda(poolAddress);
+      await PdaUtils.getObservationStatePda(poolAddress, this.programId);
 
     const [inputTokenAccount] = await findAssociatedTokenPda({
       mint: params.tokenIn,
