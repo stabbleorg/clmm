@@ -1,8 +1,10 @@
-import type {
-  Account,
-  Address,
-  Instruction,
-  TransactionSigner,
+import {
+  AccountRole,
+  type Account,
+  type AccountMeta,
+  type Address,
+  type Instruction,
+  type TransactionSigner,
 } from "@solana/kit";
 import {
   getSwapV2Instruction,
@@ -116,7 +118,7 @@ function isRetryableError(error: unknown): boolean {
  */
 async function withRetry<T>(
   fn: () => Promise<T>,
-  config: RetryConfig = DEFAULT_RETRY_CONFIG
+  config: RetryConfig = DEFAULT_RETRY_CONFIG,
 ): Promise<T> {
   let lastError: unknown;
 
@@ -134,7 +136,7 @@ async function withRetry<T>(
       // Calculate exponential backoff delay: baseDelay * 2^attempt
       const exponentialDelay = Math.min(
         config.baseDelayMs * Math.pow(2, attempt),
-        config.maxDelayMs
+        config.maxDelayMs,
       );
 
       // Add random jitter (±25%) to prevent thundering herd
@@ -212,14 +214,14 @@ export class SwapMathEngine {
     if (amountIn.lte(new BN(0))) {
       throw new ClmmError(
         ClmmErrorCode.SWAP_AMOUNT_CANNOT_BE_ZERO,
-        "Swap amount must be greater than zero"
+        "Swap amount must be greater than zero",
       );
     }
 
     if (slippageTolerance < 0 || slippageTolerance > 1) {
       throw new ClmmError(
         ClmmErrorCode.PRICE_SLIPPAGE,
-        `Slippage tolerance must be between 0 and 1, got ${slippageTolerance}`
+        `Slippage tolerance must be between 0 and 1, got ${slippageTolerance}`,
       );
     }
 
@@ -231,7 +233,7 @@ export class SwapMathEngine {
     const sqrtPriceTargetX64 = this.calculateSqrtPriceLimit(
       sqrtPriceCurrentX64,
       zeroForOne,
-      slippageTolerance
+      slippageTolerance,
     );
 
     const step = SwapMath.computeSwapStep(
@@ -241,18 +243,18 @@ export class SwapMathEngine {
       amountIn,
       feeRate,
       true, // is_base_input
-      zeroForOne
+      zeroForOne,
     );
 
     const priceBefore = SqrtPriceMath.sqrtPriceX64ToPrice(
       sqrtPriceCurrentX64,
       pool.mintDecimals0,
-      pool.mintDecimals1
+      pool.mintDecimals1,
     );
     const priceAfter = SqrtPriceMath.sqrtPriceX64ToPrice(
       step.sqrtPriceNextX64,
       pool.mintDecimals0,
-      pool.mintDecimals1
+      pool.mintDecimals1,
     );
 
     const priceImpact = priceAfter
@@ -263,7 +265,7 @@ export class SwapMathEngine {
 
     const slippageBN = new BN(Math.floor(slippageTolerance * 10_000));
     const minAmountOut = step.amountOut.sub(
-      step.amountOut.mul(slippageBN).div(new BN(10_000))
+      step.amountOut.mul(slippageBN).div(new BN(10_000)),
     );
 
     return {
@@ -302,7 +304,7 @@ export class SwapMathEngine {
    * Trade-off: 3-5 RPC calls for accuracy vs. 2 RPC calls for speed.
    */
   async calculateAccurateSwap(
-    params: AccurateSwapParams
+    params: AccurateSwapParams,
   ): Promise<DetailedSwapQuote> {
     const {
       pool,
@@ -317,7 +319,7 @@ export class SwapMathEngine {
     const sqrtPriceLimitX64 = this.calculateSqrtPriceLimit(
       new BN(pool.sqrtPriceX64.toString()),
       zeroForOne,
-      slippageTolerance
+      slippageTolerance,
     );
 
     const result = await SwapMath.swapCompute({
@@ -343,12 +345,12 @@ export class SwapMathEngine {
     const priceBefore = SqrtPriceMath.sqrtPriceX64ToPrice(
       new BN(pool.sqrtPriceX64.toString()),
       pool.mintDecimals0,
-      pool.mintDecimals1
+      pool.mintDecimals1,
     );
     const priceAfter = SqrtPriceMath.sqrtPriceX64ToPrice(
       result.endSqrtPriceX64,
       pool.mintDecimals0,
-      pool.mintDecimals1
+      pool.mintDecimals1,
     );
     const priceImpact = priceAfter
       .minus(priceBefore)
@@ -358,7 +360,7 @@ export class SwapMathEngine {
 
     const slippageBN = new BN(Math.floor(slippageTolerance * 10_000));
     const minAmountOut = result.amountOut.sub(
-      result.amountOut.mul(slippageBN).div(new BN(10_000))
+      result.amountOut.mul(slippageBN).div(new BN(10_000)),
     );
 
     const feeImpact = ammConfig.tradeFeeRate / FEE_RATE_DENOMINATOR_NUMBER;
@@ -406,13 +408,15 @@ export class SwapMathEngine {
   calculateSqrtPriceLimit(
     sqrtPriceX64: BN,
     zeroForOne: boolean,
-    slippageTolerance: number
+    slippageTolerance: number,
   ): BN {
     const bps = Math.floor(slippageTolerance * 10_000);
     const base = new BN(10_000);
 
     const scaled = zeroForOne
-      ? sqrtPriceX64.mul(base.sub(new BN(bps))).div(base) // Decrease price
+      ? sqrtPriceX64
+          .mul(base.sub(new BN(bps)))
+          .div(base) // Decrease price
       : sqrtPriceX64.mul(base.add(new BN(bps))).div(base); // Increase price
 
     const min = new BN(MIN_SQRT_PRICE_X64);
@@ -442,7 +446,7 @@ export class SwapQuoteResult {
     public readonly quote: SwapQuote,
     private readonly decIn: number,
     private readonly decOut: number,
-    private readonly zeroForOne: boolean
+    private readonly zeroForOne: boolean,
   ) {}
 
   /**
@@ -454,10 +458,10 @@ export class SwapQuoteResult {
    */
   get executionPrice(): Decimal {
     const inHuman = new Decimal(this.quote.amountIn.toString()).div(
-      new Decimal(10).pow(this.decIn)
+      new Decimal(10).pow(this.decIn),
     );
     const outHuman = new Decimal(this.quote.amountOut.toString()).div(
-      new Decimal(10).pow(this.decOut)
+      new Decimal(10).pow(this.decOut),
     );
 
     return outHuman.div(inHuman);
@@ -659,7 +663,7 @@ export class SwapManager {
    */
   constructor(
     private readonly config: ClmmSdkConfig,
-    private readonly managerConfig?: SwapManagerConfig
+    private readonly managerConfig?: SwapManagerConfig,
   ) {
     this.programId = config.programAddress ?? STABBLE_CLMM_PROGRAM_ID;
     // Initialize pool data manager with production-grade caching:
@@ -684,7 +688,7 @@ export class SwapManager {
 
       this.log(
         "info",
-        `PriceApiClient initialized with baseUrl: ${managerConfig.priceApiConfig.baseUrl}`
+        `PriceApiClient initialized with baseUrl: ${managerConfig.priceApiConfig.baseUrl}`,
       );
     }
   }
@@ -851,7 +855,7 @@ export class SwapManager {
    */
   estimateComputeBudget(
     quote: SwapQuoteResult,
-    priorityLevel: "low" | "medium" | "high" = "medium"
+    priorityLevel: "low" | "medium" | "high" = "medium",
   ): {
     computeUnits: number;
     microLamportsPerCU: number;
@@ -867,7 +871,7 @@ export class SwapManager {
 
     const microLamportsPerCU = priorityFees[priorityLevel];
     const totalPriorityFeeLamports = Math.ceil(
-      (computeUnits * microLamportsPerCU) / 1_000_000
+      (computeUnits * microLamportsPerCU) / 1_000_000,
     );
 
     return {
@@ -1005,7 +1009,7 @@ export class SwapManager {
     options?: {
       signal?: AbortSignal;
       allowStale?: boolean;
-    }
+    },
   ): Promise<SwapQuoteResult> {
     const {
       tokenIn,
@@ -1035,14 +1039,14 @@ export class SwapManager {
     if (!isValidSlippage(slippageTolerance)) {
       throw new ClmmError(
         ClmmErrorCode.PRICE_SLIPPAGE,
-        `Invalid slippage tolerance: ${slippageTolerance}. Must be between 0 and 1.`
+        `Invalid slippage tolerance: ${slippageTolerance}. Must be between 0 and 1.`,
       );
     }
 
     if (amountIn.lte(new BN(0))) {
       throw new ClmmError(
         ClmmErrorCode.SWAP_AMOUNT_CANNOT_BE_ZERO,
-        "Swap amount must be greater than zero."
+        "Swap amount must be greater than zero.",
       );
     }
 
@@ -1056,7 +1060,7 @@ export class SwapManager {
     if (!hasTokens) {
       throw new ClmmError(
         ClmmErrorCode.POOL_NOT_FOUND,
-        `Pool does not contain token pair: ${tokenIn} / ${tokenOut}`
+        `Pool does not contain token pair: ${tokenIn} / ${tokenOut}`,
       );
     }
 
@@ -1153,7 +1157,7 @@ export class SwapManager {
     options?: {
       signal?: AbortSignal;
       allowStale?: boolean;
-    }
+    },
   ): Promise<DetailedSwapQuote> {
     const {
       tokenIn,
@@ -1166,14 +1170,14 @@ export class SwapManager {
     if (!isValidSlippage(slippageTolerance)) {
       throw new ClmmError(
         ClmmErrorCode.PRICE_SLIPPAGE,
-        `Invalid slippage tolerance: ${slippageTolerance}. Must be between 0 and 1.`
+        `Invalid slippage tolerance: ${slippageTolerance}. Must be between 0 and 1.`,
       );
     }
 
     if (amountIn.lte(new BN(0))) {
       throw new ClmmError(
         ClmmErrorCode.SWAP_AMOUNT_CANNOT_BE_ZERO,
-        "Swap amount must be greater than zero."
+        "Swap amount must be greater than zero.",
       );
     }
 
@@ -1197,7 +1201,7 @@ export class SwapManager {
     if (!hasTokens) {
       throw new ClmmError(
         ClmmErrorCode.POOL_NOT_FOUND,
-        `Pool does not contain token pair: ${tokenIn} / ${tokenOut}`
+        `Pool does not contain token pair: ${tokenIn} / ${tokenOut}`,
       );
     }
 
@@ -1207,7 +1211,7 @@ export class SwapManager {
         pool,
         zeroForOne,
         amountIn,
-        tickArrayCount // Pass through the override
+        tickArrayCount, // Pass through the override
       );
 
       return await this.mathEngine.calculateAccurateSwap({
@@ -1224,7 +1228,7 @@ export class SwapManager {
       // fall back to simple calculation and return it as a DetailedSwapQuote
       this.log(
         "warn",
-        `Accurate swap calculation failed, falling back to simple calculation: ${error}`
+        `Accurate swap calculation failed, falling back to simple calculation: ${error}`,
       );
 
       const simpleQuote = await this.mathEngine.calculateSimpleSwap({
@@ -1239,7 +1243,7 @@ export class SwapManager {
       const priceBefore = SqrtPriceMath.sqrtPriceX64ToPrice(
         new BN(pool.sqrtPriceX64.toString()),
         pool.mintDecimals0,
-        pool.mintDecimals1
+        pool.mintDecimals1,
       );
 
       // Return simple quote formatted as DetailedSwapQuote
@@ -1252,7 +1256,7 @@ export class SwapManager {
           slippage: Math.max(
             0,
             simpleQuote.priceImpact -
-              ammConfig.tradeFeeRate / FEE_RATE_DENOMINATOR_NUMBER
+              ammConfig.tradeFeeRate / FEE_RATE_DENOMINATOR_NUMBER,
           ),
         },
       };
@@ -1264,14 +1268,14 @@ export class SwapManager {
     pool: PoolState,
     zeroForOne: boolean,
     amountIn: BN,
-    tickArrayCountOverride?: number
+    tickArrayCountOverride?: number,
   ): Promise<{ [key: string]: Account<TickArrayState> }> {
     const arrayCount =
       tickArrayCountOverride ?? this.estimateTickArrayCount(pool, amountIn);
 
     this.log(
       "debug",
-      `Fetching ${arrayCount} tick arrays for swap. Pool: ${poolAddress}, AmountIn: ${amountIn.toString()}, ZeroForOne: ${zeroForOne}`
+      `Fetching ${arrayCount} tick arrays for swap. Pool: ${poolAddress}, AmountIn: ${amountIn.toString()}, ZeroForOne: ${zeroForOne}`,
     );
 
     const tickArrayAddresses = await this.getRequiredTickArrays(
@@ -1279,14 +1283,14 @@ export class SwapManager {
       pool.tickCurrent,
       pool.tickSpacing,
       zeroForOne,
-      arrayCount
+      arrayCount,
     );
 
     // Try to fetch all tick arrays, but handle the case where some don't exist
     try {
       // First, try fetching all arrays together (most efficient)
       const tickArrays = await withRetry(() =>
-        fetchAllTickArrayState(this.config.rpc, tickArrayAddresses)
+        fetchAllTickArrayState(this.config.rpc, tickArrayAddresses),
       );
 
       const cache: { [key: string]: Account<TickArrayState> } = {};
@@ -1296,7 +1300,7 @@ export class SwapManager {
 
       this.log(
         "debug",
-        `Successfully fetched ${tickArrays.length} tick arrays`
+        `Successfully fetched ${tickArrays.length} tick arrays`,
       );
 
       return cache;
@@ -1305,7 +1309,7 @@ export class SwapManager {
       // Try fetching them individually and skip the ones that don't exist
       this.log(
         "warn",
-        `Batch fetch failed, attempting individual fetch. Error: ${error}`
+        `Batch fetch failed, attempting individual fetch. Error: ${error}`,
       );
 
       const cache: { [key: string]: Account<TickArrayState> } = {};
@@ -1314,7 +1318,7 @@ export class SwapManager {
       for (const address of tickArrayAddresses) {
         try {
           const [tickArray] = await withRetry(() =>
-            fetchAllTickArrayState(this.config.rpc, [address])
+            fetchAllTickArrayState(this.config.rpc, [address]),
           );
           if (tickArray) {
             cache[tickArray.address] = tickArray;
@@ -1324,14 +1328,14 @@ export class SwapManager {
           // This tick array doesn't exist or isn't initialized - skip it
           this.log(
             "debug",
-            `Tick array ${address} not found or uninitialized, skipping`
+            `Tick array ${address} not found or uninitialized, skipping`,
           );
         }
       }
 
       this.log(
         "info",
-        `Fetched ${successCount} out of ${arrayCount} requested tick arrays`
+        `Fetched ${successCount} out of ${arrayCount} requested tick arrays`,
       );
 
       // If we got at least some tick arrays, return them
@@ -1343,12 +1347,12 @@ export class SwapManager {
       // If we couldn't fetch any tick arrays, throw a more specific error
       this.log(
         "error",
-        `No tick arrays found for pool ${poolAddress}. This pool may have very sparse liquidity.`
+        `No tick arrays found for pool ${poolAddress}. This pool may have very sparse liquidity.`,
       );
       throw new ClmmError(
         ClmmErrorCode.SWAP_SIMULATION_FAILED,
         `No initialized tick arrays found. This pool may have very sparse liquidity or may not be properly initialized. Cannot perform accurate swap calculation.`,
-        { cause: error }
+        { cause: error },
       );
     }
   }
@@ -1427,12 +1431,12 @@ export class SwapManager {
     currentTIck: number,
     tickSpacing: number,
     zeroForOne: boolean,
-    count: number = 3
+    count: number = 3,
   ): Promise<Address[]> {
     const tickArrayAddresses: Address[] = [];
     const currentStartIndex = PdaUtils.getTickArrayStartIndex(
       currentTIck,
-      tickSpacing
+      tickSpacing,
     );
 
     for (let i = 0; i < count; i++) {
@@ -1461,14 +1465,14 @@ export class SwapManager {
     options?: {
       signal?: AbortSignal;
       allowStale?: boolean;
-    }
+    },
   ): Promise<Map<string, SwapQuoteResult>> {
     const quotes = new Map<string, SwapQuoteResult>();
 
     const pool = await this.poolDataManager.getPoolState(poolAddress, options);
     const ammConfig = await this.poolDataManager.getAmmConfig(
       pool.ammConfig,
-      options
+      options,
     );
 
     const zeroForOne = params.tokenIn === pool.tokenMint0;
@@ -1481,7 +1485,7 @@ export class SwapManager {
     if (!hasTokens) {
       throw new ClmmError(
         ClmmErrorCode.POOL_NOT_FOUND,
-        `Pool does not contain token pair: ${params.tokenIn} / ${params.tokenOut}`
+        `Pool does not contain token pair: ${params.tokenIn} / ${params.tokenOut}`,
       );
     }
 
@@ -1509,7 +1513,7 @@ export class SwapManager {
       } catch (error) {
         this.log(
           "warn",
-          `Failed to get quote for amount ${amountIn.toString()}: ${error}`
+          `Failed to get quote for amount ${amountIn.toString()}: ${error}`,
         );
       }
     });
@@ -1524,7 +1528,7 @@ export class SwapManager {
     options?: {
       riskTolerance?: "low" | "medium" | "high";
       maxSlippage?: number;
-    }
+    },
   ): number {
     const { riskTolerance = "medium", maxSlippage = 0.5 } = options || {};
 
@@ -1556,18 +1560,18 @@ export class SwapManager {
     options?: {
       signal?: AbortSignal;
       allowStale?: boolean;
-    }
+    },
   ): Promise<DetailedPriceImpact> {
     const pool = await this.poolDataManager.getPoolState(poolAddress, options);
     const ammConfig = await this.poolDataManager.getAmmConfig(
       pool.ammConfig,
-      options
+      options,
     );
 
     const priceBefore = SqrtPriceMath.sqrtPriceX64ToPrice(
       new BN(pool.sqrtPriceX64.toString()),
       pool.mintDecimals0,
-      pool.mintDecimals1
+      pool.mintDecimals1,
     );
 
     const initialQuote = await this.getSwapQuote(poolAddress, params, options);
@@ -1579,7 +1583,7 @@ export class SwapManager {
       const accurateQuote = await this.getAccurateSwapQuote(
         poolAddress,
         params,
-        options
+        options,
       );
       quote = accurateQuote;
       priceAfter = accurateQuote.endPrice || priceBefore;
@@ -1691,7 +1695,7 @@ export class SwapManager {
     options?: {
       signal?: AbortSignal;
       allowStale?: boolean;
-    }
+    },
   ): Promise<SwapSimulation> {
     const errors: string[] = [];
     const warnings: string[] = [];
@@ -1706,7 +1710,7 @@ export class SwapManager {
 
       const pool = await this.poolDataManager.getPoolState(
         poolAddress,
-        options
+        options,
       );
       const outputDecimals =
         params.tokenIn === pool.tokenMint0
@@ -1715,32 +1719,32 @@ export class SwapManager {
 
       if (quote.priceImpact > PRICE_IMPACT_THRESHOLDS.WARNING) {
         warnings.push(
-          `High price impact: ${(quote.priceImpact * 100).toFixed(2)}%. Consider splitting into smaller trades.`
+          `High price impact: ${(quote.priceImpact * 100).toFixed(2)}%. Consider splitting into smaller trades.`,
         );
       }
 
       if (quote.priceImpact >= PRICE_IMPACT_THRESHOLDS.ERROR) {
         errors.push(
-          `Extremely high price impact: ${(quote.priceImpact * 100).toFixed(2)}%. Swap likely to fail or result in significant slippage.`
+          `Extremely high price impact: ${(quote.priceImpact * 100).toFixed(2)}%. Swap likely to fail or result in significant slippage.`,
         );
       }
 
       const oneUnit = new BN(10).pow(new BN(outputDecimals));
       if (quote.amountOut.lt(oneUnit)) {
         warnings.push(
-          `Output amount is less than 1 unit of the output token. Consider increasing input amount or slippage tolerance.`
+          `Output amount is less than 1 unit of the output token. Consider increasing input amount or slippage tolerance.`,
         );
       }
 
       if (quote.amountOut.lte(new BN(0))) {
         errors.push(
-          "Swap would result in zero output. Amount may be too small."
+          "Swap would result in zero output. Amount may be too small.",
         );
       }
 
       if (params.slippageTolerance < 0.001) {
         warnings.push(
-          "Very tight slippage tolerance (<0.1%). Transaction may fail due to price movement."
+          "Very tight slippage tolerance (<0.1%). Transaction may fail due to price movement.",
         );
       }
 
@@ -1842,7 +1846,7 @@ export class SwapManager {
     priorQuote?: SwapQuote,
     options?: {
       signal?: AbortSignal;
-    }
+    },
   ): Promise<Instruction> {
     let quote: SwapQuote;
 
@@ -1853,7 +1857,7 @@ export class SwapManager {
       if (!simulation.willSucceed) {
         throw new ClmmError(
           ClmmErrorCode.SWAP_SIMULATION_FAILED,
-          `Cannot build swap instruction: ${simulation.errors.join("; ")}`
+          `Cannot build swap instruction: ${simulation.errors.join("; ")}`,
         );
       }
 
@@ -1864,8 +1868,10 @@ export class SwapManager {
 
     const zeroForOne = params.tokenIn === pool.tokenMint0;
 
-    const [observationState] =
-      await PdaUtils.getObservationStatePda(poolAddress, this.programId);
+    const [observationState] = await PdaUtils.getObservationStatePda(
+      poolAddress,
+      this.programId,
+    );
 
     const [inputTokenAccount] = await findAssociatedTokenPda({
       mint: params.tokenIn,
@@ -1884,7 +1890,7 @@ export class SwapManager {
       this.mathEngine.calculateSqrtPriceLimit(
         new BN(pool.sqrtPriceX64.toString()),
         zeroForOne,
-        params.slippageTolerance || DEFAULT_SLIPPAGE_TOLERANCE
+        params.slippageTolerance || DEFAULT_SLIPPAGE_TOLERANCE,
       );
 
     const input: SwapV2Input = {
@@ -1904,7 +1910,44 @@ export class SwapManager {
       isBaseInput: true,
     };
 
-    return getSwapV2Instruction(input);
+    const baseInstruction = getSwapV2Instruction(input, {
+      programAddress: this.programId,
+    });
+
+    // Build remaining accounts: tick array bitmap extension + tick arrays.
+    // The on-chain program iterates remaining_accounts to load these.
+    const remainingAccounts: AccountMeta[] = [];
+
+    // Tick array bitmap extension (readonly) — needed for pools with wide tick ranges
+    const [bitmapExtensionPda] = await PdaUtils.getTickArrayBitmapExtensionPda(
+      poolAddress,
+      this.programId,
+    );
+    remainingAccounts.push({
+      address: bitmapExtensionPda,
+      role: AccountRole.READONLY,
+    });
+
+    // Tick arrays (writable) — the program loads these with load_data_mut
+    const tickArrayAddresses = await this.getRequiredTickArrays(
+      poolAddress,
+      pool.tickCurrent,
+      pool.tickSpacing,
+      zeroForOne,
+      this.estimateTickArrayCount(pool, params.amountIn),
+    );
+
+    for (const addr of tickArrayAddresses) {
+      remainingAccounts.push({
+        address: addr,
+        role: AccountRole.WRITABLE,
+      });
+    }
+
+    return {
+      ...baseInstruction,
+      accounts: [...baseInstruction.accounts, ...remainingAccounts],
+    };
   }
 
   async getCurrentPrice(
@@ -1912,14 +1955,14 @@ export class SwapManager {
     options?: {
       signal?: AbortSignal;
       allowStale?: boolean;
-    }
+    },
   ): Promise<Decimal> {
     const pool = await this.poolDataManager.getPoolState(poolAddress, options);
 
     return SqrtPriceMath.sqrtPriceX64ToPrice(
       new BN(pool.sqrtPriceX64.toString()),
       pool.mintDecimals0,
-      pool.mintDecimals1
+      pool.mintDecimals1,
     );
   }
 
@@ -1964,7 +2007,7 @@ export class SwapManager {
     opts?: {
       signal?: AbortSignal;
       maxDivergence?: number;
-    }
+    },
   ): Promise<{
     isValid: boolean;
     onChainPrice: Decimal;
@@ -1975,7 +2018,7 @@ export class SwapManager {
   }> {
     if (!this.priceApiClient) {
       throw new Error(
-        "Price validation requires priceApiConfig to be set in SwapManagerConfig"
+        "Price validation requires priceApiConfig to be set in SwapManagerConfig",
       );
     }
 
@@ -2048,7 +2091,7 @@ export class SwapManager {
     opts?: {
       signal?: AbortSignal;
       skipValidation?: boolean;
-    }
+    },
   ): Promise<{
     quote: SwapQuoteResult;
     validation?: {
@@ -2077,7 +2120,7 @@ export class SwapManager {
       } catch (error) {
         this.log(
           "warn",
-          `Price validation failed, returning quote without validation: ${error}`
+          `Price validation failed, returning quote without validation: ${error}`,
         );
       }
     }

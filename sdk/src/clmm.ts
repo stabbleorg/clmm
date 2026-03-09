@@ -83,7 +83,7 @@ export class Clmm {
       tradeFeeRate,
       protocolFeeRate,
       fundFeeRate,
-    });
+    }, { programAddress: this.programId });
 
     return {
       instruction,

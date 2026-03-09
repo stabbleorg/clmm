@@ -268,7 +268,7 @@ export class PositionManager {
       amount1Max: amountMaxB,
       withMetadata,
       baseFlag: null,
-    });
+    }, { programAddress: this.programId });
 
     return {
       instructions: [instruction],
@@ -445,7 +445,7 @@ export class PositionManager {
       amount1Max,
       withMetadata,
       baseFlag: base === "MintA" ? true : false, // true = MintA is base, false = MintB is base
-    });
+    }, { programAddress: this.programId });
 
     const ixWithRemAccounts: Instruction = {
       ...instruction,
@@ -560,7 +560,7 @@ export class PositionManager {
       amount0Max: amountMaxA,
       amount1Max: amountMaxB,
       baseFlag: null,
-    });
+    }, { programAddress: this.programId });
 
     const ixWithRemAccounts: Instruction = {
       ...instruction,
@@ -701,7 +701,7 @@ export class PositionManager {
       liquidity,
       amount0Min: amountMinA,
       amount1Min: amountMinB,
-    });
+    }, { programAddress: this.programId });
 
     const ixWithRemAccounts: Instruction = {
       ...instruction,
@@ -781,7 +781,7 @@ export class PositionManager {
       positionNftAccount,
       personalPosition,
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-    });
+    }, { programAddress: this.programId });
 
     return {
       instructions: [instruction],
