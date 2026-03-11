@@ -137,10 +137,21 @@ pub fn exact_internal_v2<'c: 'info, 'info>(
                 );
                 continue;
             }
-            if account_info.data_len() != TickArrayState::LEN {
+            // Load tick array using trait-based loader that supports both fixed and dynamic
+            // Skip accounts that don't belong to our program or aren't tick arrays
+            if account_info.owner != &crate::id() {
                 break;
             }
-            tick_array_states.push_back(AccountLoad::load_data_mut(account_info)?);
+            // Try to load as tick array (supports both fixed and dynamic)
+            match load_tick_array_mut(account_info, &pool_state.key()) {
+                Ok(tick_array) => {
+                    tick_array_states.push_back(tick_array);
+                }
+                Err(_) => {
+                    // Not a tick array, stop processing remaining accounts
+                    break;
+                }
+            }
         }
 
         (amount_0, amount_1) = swap_internal(

@@ -104,11 +104,31 @@ export const AMM_V3_ERROR__MAX_TOKEN_OVERFLOW = 0x179a; // 6042
 export const AMM_V3_ERROR__CALCULATE_OVERFLOW = 0x179b; // 6043
 /** TransferFeeCalculateNotMatch: TransferFee calculate not match */
 export const AMM_V3_ERROR__TRANSFER_FEE_CALCULATE_NOT_MATCH = 0x179c; // 6044
+/** InvalidTickSpacing: Tick-spacing is not supported */
+export const AMM_V3_ERROR__INVALID_TICK_SPACING = 0x179d; // 6045
+/** InvalidTickArraySequence: Invalid tick array sequence provided for instruction. */
+export const AMM_V3_ERROR__INVALID_TICK_ARRAY_SEQUENCE = 0x179e; // 6046
+/** TickNotFound: Tick not found within tick array */
+export const AMM_V3_ERROR__TICK_NOT_FOUND = 0x179f; // 6047
+/** DifferentPoolTickArrayAccount: TickArray account for different pool provided */
+export const AMM_V3_ERROR__DIFFERENT_POOL_TICK_ARRAY_ACCOUNT = 0x17a0; // 6048
+/** InvalidStartTick: Invalid start tick index provided. */
+export const AMM_V3_ERROR__INVALID_START_TICK = 0x17a1; // 6049
+/** AccountDiscriminatorNotFound: Invalid account discriminator */
+export const AMM_V3_ERROR__ACCOUNT_DISCRIMINATOR_NOT_FOUND = 0x17a2; // 6050
+/** AccountDiscriminatorMismatch: Account does not have the expected discriminator */
+export const AMM_V3_ERROR__ACCOUNT_DISCRIMINATOR_MISMATCH = 0x17a3; // 6051
+/** AccountOwnedByWrongProgram: Account isn't owned by our program */
+export const AMM_V3_ERROR__ACCOUNT_OWNED_BY_WRONG_PROGRAM = 0x17a4; // 6052
 
 export type AmmV3Error =
+  | typeof AMM_V3_ERROR__ACCOUNT_DISCRIMINATOR_MISMATCH
+  | typeof AMM_V3_ERROR__ACCOUNT_DISCRIMINATOR_NOT_FOUND
   | typeof AMM_V3_ERROR__ACCOUNT_LACK
+  | typeof AMM_V3_ERROR__ACCOUNT_OWNED_BY_WRONG_PROGRAM
   | typeof AMM_V3_ERROR__CALCULATE_OVERFLOW
   | typeof AMM_V3_ERROR__CLOSE_POSITION_ERR
+  | typeof AMM_V3_ERROR__DIFFERENT_POOL_TICK_ARRAY_ACCOUNT
   | typeof AMM_V3_ERROR__EXCEPT_REWARD_MINT
   | typeof AMM_V3_ERROR__FORBID_BOTH_ZERO_FOR_SUPPLY_LIQUIDITY
   | typeof AMM_V3_ERROR__FULL_REWARD_INFO
@@ -121,9 +141,12 @@ export type AmmV3Error =
   | typeof AMM_V3_ERROR__INVALID_REWARD_INIT_PARAM
   | typeof AMM_V3_ERROR__INVALID_REWARD_INPUT_ACCOUNT_NUMBER
   | typeof AMM_V3_ERROR__INVALID_REWARD_PERIOD
+  | typeof AMM_V3_ERROR__INVALID_START_TICK
   | typeof AMM_V3_ERROR__INVALID_TICK_ARRAY
   | typeof AMM_V3_ERROR__INVALID_TICK_ARRAY_BOUNDARY
+  | typeof AMM_V3_ERROR__INVALID_TICK_ARRAY_SEQUENCE
   | typeof AMM_V3_ERROR__INVALID_TICK_INDEX
+  | typeof AMM_V3_ERROR__INVALID_TICK_SPACING
   | typeof AMM_V3_ERROR__INVALID_UPDATE_CONFIG_FLAG
   | typeof AMM_V3_ERROR__LIQUIDITY_ADD_VALUE_ERR
   | typeof AMM_V3_ERROR__LIQUIDITY_INSUFFICIENT
@@ -142,6 +165,7 @@ export type AmmV3Error =
   | typeof AMM_V3_ERROR__TICK_AND_SPACING_NOT_MATCH
   | typeof AMM_V3_ERROR__TICK_INVALID_ORDER
   | typeof AMM_V3_ERROR__TICK_LOWER_OVERFLOW
+  | typeof AMM_V3_ERROR__TICK_NOT_FOUND
   | typeof AMM_V3_ERROR__TICK_UPPER_OVERFLOW
   | typeof AMM_V3_ERROR__TOO_LITTLE_OUTPUT_RECEIVED
   | typeof AMM_V3_ERROR__TOO_MUCH_INPUT_PAID
@@ -155,9 +179,13 @@ export type AmmV3Error =
 let ammV3ErrorMessages: Record<AmmV3Error, string> | undefined;
 if (process.env.NODE_ENV !== 'production') {
   ammV3ErrorMessages = {
+    [AMM_V3_ERROR__ACCOUNT_DISCRIMINATOR_MISMATCH]: `Account does not have the expected discriminator`,
+    [AMM_V3_ERROR__ACCOUNT_DISCRIMINATOR_NOT_FOUND]: `Invalid account discriminator`,
     [AMM_V3_ERROR__ACCOUNT_LACK]: `Account lack`,
+    [AMM_V3_ERROR__ACCOUNT_OWNED_BY_WRONG_PROGRAM]: `Account isn't owned by our program`,
     [AMM_V3_ERROR__CALCULATE_OVERFLOW]: `Calculate overflow`,
     [AMM_V3_ERROR__CLOSE_POSITION_ERR]: `Remove liquitity, collect fees owed and reward then you can close position account`,
+    [AMM_V3_ERROR__DIFFERENT_POOL_TICK_ARRAY_ACCOUNT]: `TickArray account for different pool provided`,
     [AMM_V3_ERROR__EXCEPT_REWARD_MINT]: `The reward tokens must contain one of pool vault mint except the last reward`,
     [AMM_V3_ERROR__FORBID_BOTH_ZERO_FOR_SUPPLY_LIQUIDITY]: `Both token amount must not be zero while supply liquidity`,
     [AMM_V3_ERROR__FULL_REWARD_INFO]: `The init reward token reach to the max`,
@@ -170,9 +198,12 @@ if (process.env.NODE_ENV !== 'production') {
     [AMM_V3_ERROR__INVALID_REWARD_INIT_PARAM]: `Invalid reward init param`,
     [AMM_V3_ERROR__INVALID_REWARD_INPUT_ACCOUNT_NUMBER]: `Invalid collect reward input account number`,
     [AMM_V3_ERROR__INVALID_REWARD_PERIOD]: `Invalid reward period`,
+    [AMM_V3_ERROR__INVALID_START_TICK]: `Invalid start tick index provided.`,
     [AMM_V3_ERROR__INVALID_TICK_ARRAY]: `Invalid tick array account`,
     [AMM_V3_ERROR__INVALID_TICK_ARRAY_BOUNDARY]: `Invalid tick array boundary`,
+    [AMM_V3_ERROR__INVALID_TICK_ARRAY_SEQUENCE]: `Invalid tick array sequence provided for instruction.`,
     [AMM_V3_ERROR__INVALID_TICK_INDEX]: `Tick out of range`,
+    [AMM_V3_ERROR__INVALID_TICK_SPACING]: `Tick-spacing is not supported`,
     [AMM_V3_ERROR__INVALID_UPDATE_CONFIG_FLAG]: `invalid update clmm config flag`,
     [AMM_V3_ERROR__LIQUIDITY_ADD_VALUE_ERR]: `Liquidity add delta L must be greater, or equal to before`,
     [AMM_V3_ERROR__LIQUIDITY_INSUFFICIENT]: `Liquidity insufficient`,
@@ -191,6 +222,7 @@ if (process.env.NODE_ENV !== 'production') {
     [AMM_V3_ERROR__TICK_AND_SPACING_NOT_MATCH]: `tick % tick_spacing must be zero`,
     [AMM_V3_ERROR__TICK_INVALID_ORDER]: `The lower tick must be below the upper tick`,
     [AMM_V3_ERROR__TICK_LOWER_OVERFLOW]: `The tick must be greater, or equal to the minimum tick(-443636)`,
+    [AMM_V3_ERROR__TICK_NOT_FOUND]: `Tick not found within tick array`,
     [AMM_V3_ERROR__TICK_UPPER_OVERFLOW]: `The tick must be lesser than, or equal to the maximum tick(443636)`,
     [AMM_V3_ERROR__TOO_LITTLE_OUTPUT_RECEIVED]: `Too little output received`,
     [AMM_V3_ERROR__TOO_MUCH_INPUT_PAID]: `Too much input paid`,

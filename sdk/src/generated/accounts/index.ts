@@ -7,6 +7,7 @@
  */
 
 export * from './ammConfig';
+export * from './dynamicTickArray';
 export * from './observationState';
 export * from './operationState';
 export * from './personalPositionState';
@@ -14,4 +15,3 @@ export * from './poolState';
 export * from './protocolPositionState';
 export * from './supportMintAssociated';
 export * from './tickArrayBitmapExtension';
-export * from './tickArrayState';

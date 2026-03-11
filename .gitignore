@@ -21,3 +21,4 @@ KeyPairs
 
 # E2E test state
 .devnet-test-state.json
+tests/helpers/test-admin-keypair.json

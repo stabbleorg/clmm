@@ -10,10 +10,11 @@ use anchor_spl::token_interface::{Mint, Token2022};
 
 pub fn increase_liquidity<'a, 'b, 'c: 'info, 'info>(
     nft_owner: &'b Signer<'info>,
+    system_program: &'b Program<'info, System>,
     pool_state_loader: &'b AccountLoader<'info, PoolState>,
     personal_position: &'b mut Box<Account<'info, PersonalPositionState>>,
-    tick_array_lower_loader: &'b AccountLoader<'info, TickArrayState>,
-    tick_array_upper_loader: &'b AccountLoader<'info, TickArrayState>,
+    tick_array_lower_info: &AccountInfo<'info>,
+    tick_array_upper_info: &AccountInfo<'info>,
     token_account_0: &'b AccountInfo<'info>,
     token_account_1: &'b AccountInfo<'info>,
     token_vault_0: &'b AccountInfo<'info>,
@@ -51,12 +52,13 @@ pub fn increase_liquidity<'a, 'b, 'c: 'info, 'info>(
         ..
     } = add_liquidity(
         &nft_owner,
+        system_program,
         token_account_0,
         token_account_1,
         token_vault_0,
         token_vault_1,
-        &AccountLoad::<TickArrayState>::try_from(&tick_array_lower_loader.to_account_info())?,
-        &AccountLoad::<TickArrayState>::try_from(&tick_array_upper_loader.to_account_info())?,
+        tick_array_lower_info,
+        tick_array_upper_info,
         token_program_2022,
         token_program,
         vault_0_mint,

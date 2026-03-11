@@ -23,6 +23,11 @@ declare_id!("8896VTm3Z3g8PuktiDdW9JLxZP1ww2r5c9Tz5AbaBjAJ");
 declare_id!("6dMXqGZ3ga2dikrYS9ovDXgHGh5RUsb2RTUj6hrQXhk6");
 pub mod admin {
     use super::{pubkey, Pubkey};
+
+    #[cfg(feature = "testing")]
+    pub const ID: Pubkey = pubkey!("7qYDaJTwrm4myf19cKGq2wrkSuuzy3LQ771mu6BEakhg");
+
+    #[cfg(not(feature = "testing"))]
     pub const ID: Pubkey = pubkey!("3kXrf8w8Z6EjLJU4S8dAkpRL2von8z7Eh3kJnFrmo7Z2");
 }
 
@@ -405,5 +410,19 @@ pub mod amm_v3 {
         ctx: Context<'a, 'b, 'c, 'info, CloseProtocolPosition<'info>>,
     ) -> Result<()> {
         instructions::close_protocol_position(ctx)
+    }
+
+    /// Dummy instruction to include DynamicTickArray in the IDL.
+    /// Anchor only includes account types in the IDL if they are used in at least one instruction.
+    /// This instruction is never actually called, it only exists for IDL generation.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The context of accounts
+    ///
+    pub fn idl_include<'a, 'b, 'c, 'info>(
+        ctx: Context<'a, 'b, 'c, 'info, IdlInclude<'info>>,
+    ) -> Result<()> {
+        instructions::idl_include(ctx)
     }
 }

@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "cli": "npx ts-node --files cli",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build-program": "anchor build",
+    "update-idl": "node scripts/add-dynamic-tick-array-to-idl.js",
+    "build-sdk": "anchor build && cp target/idl/amm_v3.json sdk/idl/stabble_clmm.json && cd sdk && yarn generate-clients"
   },
   "repository": {
     "type": "git",
@@ -25,11 +28,16 @@
     "@solana-program/token-2022": "^0.5.0",
     "@solana/kit": "^3.0.3",
     "@solana/spl-token": "^0.4.14",
-    "commander": "^14.0.1",
-    "dotenv": "^17.2.2",
+    "@solana/web3.js": "^1.98.4",
     "@types/bn.js": "^5.2.0",
     "bn.js": "^5.2.2",
+    "commander": "^14.0.1",
     "decimal.js": "^10.6.0",
+    "dotenv": "^17.2.2",
     "typescript": "^5.9.2"
+  },
+  "devDependencies": {
+    "solana-bankrun": "^0.4.0",
+    "vitest": "^4.0.18"
   }
 }

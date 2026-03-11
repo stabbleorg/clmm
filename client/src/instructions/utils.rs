@@ -316,7 +316,7 @@ pub fn get_out_put_amount_and_remaining_accounts(
     pool_config: &AmmConfig,
     pool_state: &PoolState,
     tickarray_bitmap_extension: &TickArrayBitmapExtension,
-    tick_arrays: &mut VecDeque<TickArrayState>,
+    tick_arrays: &mut VecDeque<&dyn TickArrayType>,
 ) -> Result<(u64, VecDeque<i32>), &'static str> {
     let (is_pool_current_tick_array, current_valid_tick_array_start_index) = pool_state
         .get_first_initialized_tick_array(&Some(*tickarray_bitmap_extension), zero_for_one)
@@ -349,7 +349,7 @@ fn swap_compute(
     sqrt_price_limit_x64: u128,
     pool_state: &PoolState,
     tickarray_bitmap_extension: &TickArrayBitmapExtension,
-    tick_arrays: &mut VecDeque<TickArrayState>,
+    tick_arrays: &mut VecDeque<&dyn TickArrayType>,
 ) -> Result<(u64, VecDeque<i32>), &'static str> {
     if amount_specified == 0 {
         return Result::Err("amountSpecified must not be 0");
@@ -389,11 +389,11 @@ fn swap_compute(
     };
 
     let mut tick_array_current = tick_arrays.pop_front().unwrap();
-    if tick_array_current.start_tick_index != current_valid_tick_array_start_index {
+    if tick_array_current.start_tick_index() != current_valid_tick_array_start_index {
         return Result::Err("tick array start tick index does not match");
     }
     let mut tick_array_start_index_vec = VecDeque::new();
-    tick_array_start_index_vec.push_back(tick_array_current.start_tick_index);
+    tick_array_start_index_vec.push_back(tick_array_current.start_tick_index());
     let mut loop_count = 0;
     // loop across ticks until input liquidity is consumed, or the limit price is reached
     while state.amount_specified_remaining != 0
@@ -436,11 +436,11 @@ fn swap_compute(
             if current_valid_tick_array_start_index.is_none() {
                 return Result::Err("tick array start tick index out of range limit");
             }
-            if tick_array_current.start_tick_index != current_valid_tick_array_start_index.unwrap()
+            if tick_array_current.start_tick_index() != current_valid_tick_array_start_index.unwrap()
             {
                 return Result::Err("tick array start tick index does not match");
             }
-            tick_array_start_index_vec.push_back(tick_array_current.start_tick_index);
+            tick_array_start_index_vec.push_back(tick_array_current.start_tick_index());
             let mut first_initialized_tick = tick_array_current
                 .first_initialized_tick(zero_for_one)
                 .unwrap();
