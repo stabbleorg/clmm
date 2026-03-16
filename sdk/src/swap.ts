@@ -26,6 +26,7 @@ import { PdaUtils, SqrtPriceMath, SwapMath } from "./utils";
 import {
   findAssociatedTokenPda,
   TOKEN_PROGRAM_ADDRESS,
+  getCreateAssociatedTokenIdempotentInstruction,
 } from "@solana-program/token";
 import {
   DEFAULT_SLIPPAGE_TOLERANCE,
@@ -1846,8 +1847,9 @@ export class SwapManager {
     priorQuote?: SwapQuote,
     options?: {
       signal?: AbortSignal;
+      createOutputAta?: boolean;
     },
-  ): Promise<Instruction> {
+  ): Promise<Instruction[]> {
     let quote: SwapQuote;
 
     if (priorQuote) {
@@ -1944,10 +1946,26 @@ export class SwapManager {
       });
     }
 
-    return {
+    const swapInstruction = {
       ...baseInstruction,
       accounts: [...baseInstruction.accounts, ...remainingAccounts],
     };
+
+    const instructions: Instruction[] = [swapInstruction];
+
+    if (options?.createOutputAta) {
+      instructions.unshift(
+        getCreateAssociatedTokenIdempotentInstruction({
+          payer,
+          ata: outputTokenAccount,
+          owner: payer.address,
+          mint: params.tokenOut,
+          tokenProgram: TOKEN_PROGRAM_ADDRESS,
+        }),
+      );
+    }
+
+    return instructions;
   }
 
   async getCurrentPrice(

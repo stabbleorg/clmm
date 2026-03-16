@@ -326,18 +326,21 @@ describe("SwapManager", () => {
         );
 
         expect(instruction).toBeDefined();
-        expect(instruction.programAddress).toBeDefined();
-        expect(instruction.accounts).toBeDefined();
-        expect(instruction.data).toBeDefined();
+        expect(instruction.length).toBeGreaterThan(0);
+        const swapIx = instruction[instruction.length - 1];
+        expect(swapIx.programAddress).toBeDefined();
+        expect(swapIx.accounts).toBeDefined();
+        expect(swapIx.data).toBeDefined();
       });
 
       it("should include all required accounts", async () => {
-        const instruction = await swapManager.buildSwapInstruction(
+        const instructions = await swapManager.buildSwapInstruction(
           TEST_ADDRESSES.USDC_SOL_POOL as Address,
           mockSigner,
           mockSwapParams
         );
 
+        const instruction = instructions[instructions.length - 1];
         // Should have multiple accounts
         expect(instruction.accounts).toBeDefined();
         if (instruction.accounts) {
