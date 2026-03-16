@@ -106,8 +106,10 @@ describe("Integration: Complete Swap Flow (v2)", () => {
         params
       );
 
-      expect(ix.programAddress).toBeDefined();
-      expect(ix.accounts).toBeDefined();
+      expect(ix.length).toBeGreaterThan(0);
+      const swapIx = ix[ix.length - 1];
+      expect(swapIx.programAddress).toBeDefined();
+      expect(swapIx.accounts).toBeDefined();
     });
 
     it("should handle quote with price validation enabled", async () => {

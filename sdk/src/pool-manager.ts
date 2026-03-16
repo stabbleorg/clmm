@@ -130,7 +130,7 @@ export class PoolManager {
       tokenProgram1: TOKEN_PROGRAM_ADDRESS,
       sqrtPriceX64: BigInt(initialPriceX64.toString()),
       openTime: BigInt(0),
-    });
+    }, { programAddress: this.programId });
 
     return {
       instructions: [instruction],
@@ -187,7 +187,7 @@ export class PoolManager {
       tradeFeeRate,
       protocolFeeRate,
       fundFeeRate,
-    });
+    }, { programAddress: this.programId });
 
     return {
       instructions: [instruction],
