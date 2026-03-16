@@ -537,7 +537,7 @@ export async function decreaseLiquidity(
   const ix = new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [
-      { pubkey: payer.publicKey, isSigner: true, isWritable: false },       // nft_owner
+      { pubkey: payer.publicKey, isSigner: true, isWritable: true },        // nft_owner (mut for rent refund)
       { pubkey: positionNftAccount, isSigner: false, isWritable: false },   // nft_account
       { pubkey: personalPosition, isSigner: false, isWritable: true },      // personal_position
       { pubkey: poolPda, isSigner: false, isWritable: true },               // pool_state

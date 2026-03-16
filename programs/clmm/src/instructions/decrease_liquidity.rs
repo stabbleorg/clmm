@@ -20,6 +20,7 @@ pub fn decrease_liquidity<'b, 'c: 'info, 'info>(
     tick_array_upper_info: &AccountInfo<'info>,
     recipient_token_account_0: &AccountInfo<'info>,
     recipient_token_account_1: &AccountInfo<'info>,
+    rent_recipient: &AccountInfo<'info>,
     token_program: &'b Program<'info, Token>,
     token_program_2022: Option<Program<'info, Token2022>>,
     _memo_program: Option<UncheckedAccount<'info>>,
@@ -89,6 +90,7 @@ pub fn decrease_liquidity<'b, 'c: 'info, 'info>(
             tick_array_lower_info,
             tick_array_upper_info,
             tickarray_bitmap_extension,
+            rent_recipient,
             liquidity,
         )?;
 
@@ -198,6 +200,7 @@ pub fn decrease_liquidity_and_update_position<'c: 'info, 'info>(
     tick_array_lower_info: &AccountInfo<'info>,
     tick_array_upper_info: &AccountInfo<'info>,
     tick_array_bitmap_extension: Option<&'c AccountInfo<'info>>,
+    rent_recipient: &AccountInfo<'info>,
     liquidity: u128,
 ) -> Result<(u64, u64, u64, u64)> {
     let mut pool_state = pool_state_loader.load_mut()?;
@@ -216,6 +219,7 @@ pub fn decrease_liquidity_and_update_position<'c: 'info, 'info>(
             tick_array_lower_info,
             tick_array_upper_info,
             tick_array_bitmap_extension,
+            rent_recipient,
             personal_position.tick_lower_index,
             personal_position.tick_upper_index,
             liquidity,
@@ -273,6 +277,7 @@ pub fn burn_liquidity<'c: 'info, 'info>(
     tick_array_lower_info: &AccountInfo<'info>,
     tick_array_upper_info: &AccountInfo<'info>,
     tickarray_bitmap_extension: Option<&'c AccountInfo<'info>>,
+    rent_recipient: &AccountInfo<'info>,
     tick_lower_index: i32,
     tick_upper_index: i32,
     liquidity: u128,
@@ -330,7 +335,8 @@ pub fn burn_liquidity<'c: 'info, 'info>(
     }; // Drop mutable borrows here
     drop(tick_arrays); // Release RefMut so realloc and re-load can access the account
 
-    // Realloc for dynamic tick arrays (shrink only, no rent refund)
+    // Realloc for dynamic tick arrays (shrink) and refund excess rent to caller
+    let rent = Rent::get()?;
     if is_same_array {
         let mut delta: i64 = 0;
         if result.tick_array_realloc.lower_shrink { delta -= DynamicTickData::LEN as i64; }
@@ -338,19 +344,36 @@ pub fn burn_liquidity<'c: 'info, 'info>(
         if delta < 0 {
             let new_size = (tick_array_lower_info.data_len() as i64 + delta) as usize;
             tick_array_lower_info.realloc(new_size, true)?;
+            let excess = tick_array_lower_info.lamports()
+                .checked_sub(rent.minimum_balance(new_size))
+                .unwrap_or(0);
+            if excess > 0 {
+                **tick_array_lower_info.try_borrow_mut_lamports()? -= excess;
+                **rent_recipient.try_borrow_mut_lamports()? += excess;
+            }
         }
     } else {
         if result.tick_array_realloc.lower_shrink {
-            tick_array_lower_info.realloc(
-                tick_array_lower_info.data_len() - DynamicTickData::LEN,
-                true,
-            )?;
+            let new_size = tick_array_lower_info.data_len() - DynamicTickData::LEN;
+            tick_array_lower_info.realloc(new_size, true)?;
+            let excess = tick_array_lower_info.lamports()
+                .checked_sub(rent.minimum_balance(new_size))
+                .unwrap_or(0);
+            if excess > 0 {
+                **tick_array_lower_info.try_borrow_mut_lamports()? -= excess;
+                **rent_recipient.try_borrow_mut_lamports()? += excess;
+            }
         }
         if result.tick_array_realloc.upper_shrink {
-            tick_array_upper_info.realloc(
-                tick_array_upper_info.data_len() - DynamicTickData::LEN,
-                true,
-            )?;
+            let new_size = tick_array_upper_info.data_len() - DynamicTickData::LEN;
+            tick_array_upper_info.realloc(new_size, true)?;
+            let excess = tick_array_upper_info.lamports()
+                .checked_sub(rent.minimum_balance(new_size))
+                .unwrap_or(0);
+            if excess > 0 {
+                **tick_array_upper_info.try_borrow_mut_lamports()? -= excess;
+                **rent_recipient.try_borrow_mut_lamports()? += excess;
+            }
         }
     }
 
